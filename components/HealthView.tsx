@@ -125,7 +125,7 @@ export default function HealthView() {
   }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4 pb-8">
+    <div className="flex w-full max-w-[1440px] flex-col gap-4 pb-8">
       {selectedDay && (
         <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="rounded-lg border border-primary/30 bg-surface p-5 shadow-sm">
