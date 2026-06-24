@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ExternalLink, Footprints, HeartPulse, Image as ImageIcon, RotateCcw } from 'lucide-react';
 
 interface ExerciseKey {
@@ -59,6 +59,8 @@ export default function HealthView() {
   const [selectedExerciseCode, setSelectedExerciseCode] = useState<string | null>(null);
   const [selectedDayNumber, setSelectedDayNumber] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const dayRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   useEffect(() => {
     Promise.all([
@@ -83,11 +85,6 @@ export default function HealthView() {
     return Object.fromEntries(exerciseLibrary.map((exercise) => [exercise.code, exercise]));
   }, [exerciseLibrary]);
 
-  const weeks = useMemo(() => {
-    if (!plan) return [];
-    return [plan.days.slice(0, 7), plan.days.slice(7, 14)];
-  }, [plan]);
-
   const selectedExercise = selectedExerciseCode ? exerciseByCode[selectedExerciseCode] : null;
   const selectedDay = useMemo(() => {
     if (!plan) return null;
@@ -96,6 +93,16 @@ export default function HealthView() {
   const selectedDayCodes = useMemo(() => {
     return extractExerciseCodes(selectedDay?.plan || '', exerciseLibrary);
   }, [selectedDay, exerciseLibrary]);
+
+  useEffect(() => {
+    if (!selectedDayNumber) return;
+    const timeline = timelineRef.current;
+    const dayRow = dayRefs.current[selectedDayNumber];
+    if (!timeline || !dayRow) return;
+
+    const rowTop = dayRow.offsetTop - timeline.offsetTop;
+    timeline.scrollTo({ top: Math.max(rowTop, 0), behavior: 'auto' });
+  }, [selectedDayNumber, plan]);
 
   const selectDay = (day: RehabDay) => {
     setSelectedDayNumber(day.day);
@@ -229,26 +236,35 @@ export default function HealthView() {
         </section>
       )}
 
-      {weeks.map((week, weekIndex) => (
-        <section key={weekIndex} className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-on-surface">Week {weekIndex + 1}</h3>
-            <span className="text-xs text-on-surface-variant">{week[0]?.label} - {week[week.length - 1]?.label}</span>
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-on-surface">Plan timeline</h3>
+            <p className="text-xs text-on-surface-variant">Opens on the current selected day. Scroll up for completed days.</p>
           </div>
+          <span className="text-xs text-on-surface-variant">
+            {plan.days[0]?.label} - {plan.days[plan.days.length - 1]?.label}
+          </span>
+        </div>
 
-          <div className="overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[84px_112px_120px_1fr] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
-              <div>Day</div>
-              <div>Date</div>
-              <div>Type</div>
-              <div>Plan</div>
-            </div>
-            {week.map((day) => {
+        <div className="overflow-hidden rounded-lg border border-border">
+          <div className="grid grid-cols-[84px_112px_120px_1fr] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
+            <div>Day</div>
+            <div>Date</div>
+            <div>Type</div>
+            <div>Plan</div>
+          </div>
+          <div ref={timelineRef} className="max-h-[460px] overflow-y-auto scroll-smooth">
+            {plan.days.map((day) => {
               const isToday = day.date === plan.todayDate;
               const isSelected = day.day === selectedDay?.day;
+              const isPast = plan.today && day.date < plan.todayDate;
               return (
                 <div
                   key={day.day}
+                  ref={(node) => {
+                    dayRefs.current[day.day] = node;
+                  }}
                   role="button"
                   tabIndex={0}
                   onClick={() => selectDay(day)}
@@ -259,7 +275,7 @@ export default function HealthView() {
                     }
                   }}
                   className={`grid w-full grid-cols-[84px_112px_120px_1fr] border-t border-border px-3 py-3 text-left text-sm transition-colors hover:bg-hover ${
-                    isSelected ? 'bg-active' : isToday ? 'bg-blue-50' : 'bg-surface'
+                    isSelected ? 'bg-active' : isToday ? 'bg-blue-50' : isPast ? 'bg-surface text-on-surface-variant opacity-70' : 'bg-surface'
                   }`}
                 >
                   <div className="font-semibold text-on-surface">Day {day.day}</div>
@@ -288,7 +304,7 @@ export default function HealthView() {
                         ))}
                       </div>
                     </div>
-                    <span className="mt-1 rounded-full border border-border p-1.5 text-on-surface-variant" title="Mark complete">
+                    <span className="mt-1 rounded-full border border-border p-1.5 text-on-surface-variant" title={isPast ? 'Completed day' : 'Mark complete'}>
                       <CheckCircle2 className="h-4 w-4" />
                     </span>
                   </div>
@@ -296,8 +312,8 @@ export default function HealthView() {
               );
             })}
           </div>
-        </section>
-      ))}
+        </div>
+      </section>
 
       <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <details>
