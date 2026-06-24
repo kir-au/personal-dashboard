@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ChevronRight, FileText, Folder, Calendar, Tag, User, File, FileCode, FileImage, FileArchive, FileVideo, FileAudio } from 'lucide-react';
+import { Bookmark, CheckCircle2, ChevronRight, FileText, Folder, File, FileCode, FileImage, FileArchive, FileVideo, FileAudio, Star, Trash2 } from 'lucide-react';
 import MarkdownModal from './MarkdownModal';
 
 interface FileItem {
@@ -10,6 +10,12 @@ interface FileItem {
   relativePath: string;
   size: number;
   mtime: number;
+  review?: {
+    important?: boolean;
+    reviewLater?: boolean;
+    relevant?: boolean;
+    deletedAt?: string;
+  } | null;
 }
 
 interface DirectoryItem {
@@ -22,10 +28,16 @@ interface FileBrowserProps {
   initialPath?: string;
 }
 
+type ReviewFilter = 'all' | 'important' | 'reviewLater' | 'notRelevant';
+
 export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
-  const [currentPath, setCurrentPath] = useState(initialPath);
+  const [currentPath, setCurrentPath] = useState(() => {
+    if (typeof window === 'undefined') return initialPath;
+    return new URLSearchParams(window.location.search).get('path') || initialPath;
+  });
   const [files, setFiles] = useState<FileItem[]>([]);
   const [directories, setDirectories] = useState<DirectoryItem[]>([]);
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
@@ -83,9 +95,22 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
     fetchDirectory(currentPath);
   }, []);
 
+  const updateVaultPathInUrl = (path: string) => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', 'vault');
+    if (path) {
+      url.searchParams.set('path', path);
+    } else {
+      url.searchParams.delete('path');
+    }
+    window.history.replaceState(null, '', url.toString());
+  };
+
   const handleDirectoryClick = (dir: DirectoryItem) => {
     const newPath = dir.relativePath;
     setCurrentPath(newPath);
+    updateVaultPathInUrl(newPath);
     fetchDirectory(newPath);
     setSelectedFile(null);
     setFileContent(null);
@@ -96,9 +121,62 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
     fetchFileContent(file.relativePath);
   };
 
+  const updateReview = async (file: FileItem, patch: Record<string, boolean>) => {
+    const previousFiles = files;
+    const nextFiles = files.map((item) => (
+      item.relativePath === file.relativePath
+        ? { ...item, review: { ...(item.review || {}), ...patch } }
+        : item
+    ));
+    setFiles(nextFiles);
+
+    try {
+      const response = await fetch('/api/vault-review', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: file.relativePath, ...patch }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        throw new Error(data.error || 'Failed to update review metadata');
+      }
+    } catch (err) {
+      setFiles(previousFiles);
+      setError(err instanceof Error ? err.message : 'Failed to update review metadata');
+    }
+  };
+
+  const moveToTrash = async (file: FileItem) => {
+    const confirmed = window.confirm(`Move "${file.name}" to vault trash?`);
+    if (!confirmed) return;
+
+    const previousFiles = files;
+    setFiles(files.filter((item) => item.relativePath !== file.relativePath));
+    if (selectedFile?.relativePath === file.relativePath) {
+      setSelectedFile(null);
+      setFileContent(null);
+    }
+
+    try {
+      const response = await fetch('/api/vault-review', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: file.relativePath }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        throw new Error(data.error || 'Failed to move file to trash');
+      }
+    } catch (err) {
+      setFiles(previousFiles);
+      setError(err instanceof Error ? err.message : 'Failed to move file to trash');
+    }
+  };
+
   const handleBreadcrumbClick = (index: number) => {
     if (index < 0) {
       setCurrentPath('');
+      updateVaultPathInUrl('');
       fetchDirectory('');
       setSelectedFile(null);
       setFileContent(null);
@@ -107,6 +185,7 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
     const parts = currentPath.split('/').filter(p => p);
     const newPath = parts.slice(0, index + 1).join('/');
     setCurrentPath(newPath);
+    updateVaultPathInUrl(newPath);
     fetchDirectory(newPath);
     setSelectedFile(null);
     setFileContent(null);
@@ -186,26 +265,59 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
     ? ['personal-vault', ...currentPath.split('/').filter(p => p)]
     : ['personal-vault'];
 
+  const filteredFiles = files.filter((file) => {
+    if (reviewFilter === 'important') return Boolean(file.review?.important);
+    if (reviewFilter === 'reviewLater') return Boolean(file.review?.reviewLater);
+    if (reviewFilter === 'notRelevant') return file.review?.relevant === false;
+    return true;
+  });
+
+  const importantCount = files.filter((file) => file.review?.important).length;
+  const reviewLaterCount = files.filter((file) => file.review?.reviewLater).length;
+  const notRelevantCount = files.filter((file) => file.review?.relevant === false).length;
+
   return (
     <div className="h-full">
       {/* Breadcrumbs */}
       <div className="px-4 py-2 border-b border-border bg-surface-variant/50">
-        <div className="flex items-center text-sm">
-          {breadcrumbs.map((crumb, index) => (
-            <div key={index} className="flex items-center">
-              {index > 0 && <ChevronRight className="w-3 h-3 mx-1 text-on-surface-variant" />}
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center text-sm">
+            {breadcrumbs.map((crumb, index) => (
+              <div key={index} className="flex items-center">
+                {index > 0 && <ChevronRight className="w-3 h-3 mx-1 text-on-surface-variant" />}
+                <button
+                  onClick={() => handleBreadcrumbClick(index - 1)}
+                  className={`px-2 py-1 rounded hover:bg-hover transition-colors ${
+                    index === breadcrumbs.length - 1
+                      ? 'font-medium text-on-surface'
+                      : 'text-on-surface-variant'
+                  }`}
+                >
+                  {crumb}
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-1 text-xs">
+            {[
+              { id: 'all' as const, label: `All ${files.length}` },
+              { id: 'important' as const, label: `Important ${importantCount}` },
+              { id: 'reviewLater' as const, label: `Review later ${reviewLaterCount}` },
+              { id: 'notRelevant' as const, label: `Not relevant ${notRelevantCount}` },
+            ].map((item) => (
               <button
-                onClick={() => handleBreadcrumbClick(index - 1)}
-                className={`px-2 py-1 rounded hover:bg-hover transition-colors ${
-                  index === breadcrumbs.length - 1
-                    ? 'font-medium text-on-surface'
-                    : 'text-on-surface-variant'
+                key={item.id}
+                onClick={() => setReviewFilter(item.id)}
+                className={`rounded border px-2 py-1 transition-colors ${
+                  reviewFilter === item.id
+                    ? 'border-primary bg-active text-primary'
+                    : 'border-border bg-surface text-on-surface-variant hover:bg-hover'
                 }`}
               >
-                {crumb}
+                {item.label}
               </button>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
 
@@ -241,7 +353,12 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
             ))}
 
             {/* Files */}
-            {files.map((file) => (
+            {filteredFiles.map((file) => {
+              const important = Boolean(file.review?.important);
+              const reviewLater = Boolean(file.review?.reviewLater);
+              const relevant = file.review?.relevant !== false;
+
+              return (
               <div
                 key={file.relativePath}
                 className="px-4 py-3 hover:bg-hover cursor-pointer transition-colors flex items-center"
@@ -256,15 +373,66 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
                     <span>{formatDate(file.mtime)}</span>
                     <span>•</span>
                     <span>{formatSize(file.size)}</span>
+                    {important && (
+                      <>
+                        <span>•</span>
+                        <span className="text-primary">Important</span>
+                      </>
+                    )}
+                    {reviewLater && (
+                      <>
+                        <span>•</span>
+                        <span className="text-primary">Review later</span>
+                      </>
+                    )}
+                    {!relevant && (
+                      <>
+                        <span>•</span>
+                        <span className="text-error">Not relevant</span>
+                      </>
+                    )}
                   </div>
                 </div>
+                <div className="ml-3 flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                  <button
+                    onClick={() => updateReview(file, { important: !important })}
+                    className={`rounded p-2 transition-colors ${important ? 'bg-active text-primary' : 'text-on-surface-variant hover:bg-hover'}`}
+                    title={important ? 'Unmark important' : 'Mark important'}
+                  >
+                    <Star className={`h-4 w-4 ${important ? 'fill-current' : ''}`} />
+                  </button>
+                  <button
+                    onClick={() => updateReview(file, { reviewLater: !reviewLater })}
+                    className={`rounded p-2 transition-colors ${reviewLater ? 'bg-active text-primary' : 'text-on-surface-variant hover:bg-hover'}`}
+                    title={reviewLater ? 'Remove review-later bookmark' : 'Review later'}
+                  >
+                    <Bookmark className={`h-4 w-4 ${reviewLater ? 'fill-current' : ''}`} />
+                  </button>
+                  <button
+                    onClick={() => updateReview(file, { relevant: !relevant })}
+                    className={`rounded p-2 transition-colors ${relevant ? 'text-on-surface-variant hover:bg-hover' : 'bg-orange-50 text-error'}`}
+                    title={relevant ? 'Mark not relevant' : 'Mark relevant'}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => moveToTrash(file)}
+                    className="rounded p-2 text-on-surface-variant transition-colors hover:bg-orange-50 hover:text-error"
+                    title="Move to vault trash"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-            ))}
+              );
+            })}
 
-            {directories.length === 0 && files.length === 0 && (
+            {directories.length === 0 && filteredFiles.length === 0 && (
               <div className="p-8 text-center">
                 <Folder className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-on-surface-variant">Empty directory</p>
+                <p className="text-on-surface-variant">
+                  {files.length === 0 ? 'Empty directory' : 'No files match this review filter'}
+                </p>
               </div>
             )}
           </div>

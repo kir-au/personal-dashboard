@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 
 const VAULT_PATH = path.join(process.env.HOME || '', 'personal-vault');
+const REVIEW_INDEX_PATH = path.join(VAULT_PATH, 'indexes', 'vault-review.json');
 
 function safeJoinVault(relativePath: string) {
   const normalized = path.normalize(relativePath || '').replace(/^(\.\.(\/|\\|$))+/, '');
@@ -15,6 +16,13 @@ function safeJoinVault(relativePath: string) {
 
 export async function GET(request: NextRequest) {
   try {
+    let reviewIndex: Record<string, unknown> = {};
+    try {
+      reviewIndex = JSON.parse(await fs.readFile(REVIEW_INDEX_PATH, 'utf-8'));
+    } catch {
+      reviewIndex = {};
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const requestedPath = searchParams.get('path') || '';
     const year = searchParams.get('year');
@@ -56,7 +64,8 @@ export async function GET(request: NextRequest) {
         path: path.join(targetPath, entry.name),
         relativePath: path.relative(VAULT_PATH, path.join(targetPath, entry.name)),
         size: 0, // We'll get this separately
-        mtime: 0
+        mtime: 0,
+        review: reviewIndex[path.relative(VAULT_PATH, path.join(targetPath, entry.name))] || null
       }));
 
     const directories = entries
