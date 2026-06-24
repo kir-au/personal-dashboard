@@ -295,6 +295,11 @@ export default function TodayView() {
     }
   };
 
+  const applyCheckInPreset = (text: string) => {
+    setCaptureText(text);
+    if (captureStatus !== 'idle') setCaptureStatus('idle');
+  };
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-on-surface-variant">
@@ -305,61 +310,16 @@ export default function TodayView() {
 
   return (
     <div className="flex w-full max-w-[1440px] flex-col gap-4 pb-8">
-      <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-        <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-primary">
-              <CalendarDays className="h-5 w-5" />
-              <span className="text-xs font-semibold uppercase tracking-wide">Today</span>
-            </div>
-            <h2 className="text-2xl font-semibold text-on-surface">Today: one clear plan, then execute.</h2>
-            <p className="mt-2 text-sm text-on-surface-variant" style={{ maxWidth: 760 }}>
-              {publishingDay && !publishingIsToday
-                ? `Tomorrow is already planned: ${publishingDay.title}. ${publishingDay.plan}`
-                : healthDay
-                ? `Health is already planned: ${healthDay.title} / ${healthDay.plan}`
-                : primaryTask?.title ?? resume?.dailyBrief?.doFirst ?? 'Pick one useful action and schedule it before the day fills itself.'}
-            </p>
-          </div>
-
-          <div className="rounded-lg border border-border bg-surface-variant p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <MessageSquareText className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-semibold text-on-surface">Morning check-in</h3>
-            </div>
-            <textarea
-              value={captureText}
-              onChange={(event) => {
-                setCaptureText(event.target.value);
-                if (captureStatus !== 'idle') setCaptureStatus('idle');
-              }}
-              rows={4}
-              placeholder="What changed? Energy, sleep, body, mood, main constraint..."
-              className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface outline-none placeholder:text-on-surface-variant/60 focus:border-primary"
-            />
-            <div className="mt-2 flex items-center justify-between gap-3">
-              <span className="text-xs text-on-surface-variant">
-                {captureStatus === 'saved' && 'Saved to vault inbox.'}
-                {captureStatus === 'error' && 'Save failed.'}
-              </span>
-              <button
-                onClick={saveCapture}
-                disabled={!captureText.trim() || captureStatus === 'saving'}
-                className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {captureStatus === 'saving' ? 'Saving...' : 'Save check-in'}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
         <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h3 className="text-base font-semibold text-on-surface">Day map</h3>
-              <p className="text-sm text-on-surface-variant">Calendar-style routine, not a status dump.</p>
+              <div className="mb-2 flex items-center gap-2 text-primary">
+                <CalendarDays className="h-5 w-5" />
+                <span className="text-xs font-semibold uppercase tracking-wide">Today</span>
+              </div>
+              <h2 className="text-xl font-semibold text-on-surface">Day map</h2>
+              <p className="text-sm text-on-surface-variant">Use the plan unless your state changed.</p>
             </div>
             <span className="rounded-lg border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
               flexible draft
@@ -403,6 +363,70 @@ export default function TodayView() {
         </section>
 
         <aside className="flex flex-col gap-4">
+          <section className="rounded-lg border border-border bg-surface p-3 shadow-sm">
+            <details>
+              <summary className="cursor-pointer list-none">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <MessageSquareText className="h-4 w-4 text-primary" />
+                    <div>
+                      <h3 className="text-sm font-semibold text-on-surface">Optional check-in</h3>
+                      <p className="text-xs text-on-surface-variant">Use only if the day needs replanning.</p>
+                    </div>
+                  </div>
+                  <span className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant">
+                    adjust
+                  </span>
+                </div>
+              </summary>
+              <div className="mt-3">
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => applyCheckInPreset('Move today one day forward. I am not in the right state to execute this plan today.')}
+                    className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant hover:bg-hover"
+                  >
+                    Move today +1
+                  </button>
+                  <button
+                    onClick={() => applyCheckInPreset('Move this week forward. I need a recovery/reset period before continuing the current plan.')}
+                    className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant hover:bg-hover"
+                  >
+                    Move week
+                  </button>
+                  <button
+                    onClick={() => applyCheckInPreset('Rest day. Keep only health minimums and capture what changed.')}
+                    className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant hover:bg-hover"
+                  >
+                    Rest day
+                  </button>
+                </div>
+                <textarea
+                  value={captureText}
+                  onChange={(event) => {
+                    setCaptureText(event.target.value);
+                    if (captureStatus !== 'idle') setCaptureStatus('idle');
+                  }}
+                  rows={3}
+                  placeholder="What changed? Energy, sleep, body, mood, main constraint..."
+                  className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface outline-none placeholder:text-on-surface-variant/60 focus:border-primary"
+                />
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span className="text-xs text-on-surface-variant">
+                    {captureStatus === 'saved' && 'Saved to vault inbox.'}
+                    {captureStatus === 'error' && 'Save failed.'}
+                  </span>
+                  <button
+                    onClick={saveCapture}
+                    disabled={!captureText.trim() || captureStatus === 'saving'}
+                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {captureStatus === 'saving' ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            </details>
+          </section>
+
           {publishingDay && (
             <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
               <div className="mb-3 flex items-center gap-2">
