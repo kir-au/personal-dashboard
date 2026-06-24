@@ -53,7 +53,7 @@ export default function PlannerView() {
   }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4">
+    <div className="flex w-full max-w-[1440px] flex-col gap-4">
       <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <div className="relative">
           <div style={{ width: 'min(760px, 100%)', paddingRight: '14rem' }}>

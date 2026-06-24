@@ -31,8 +31,8 @@ interface SidebarItem {
 }
 
 interface SidebarProps {
-  currentView: 'today' | 'browse' | 'planner' | 'health' | 'recent';
-  onViewChange: (view: 'today' | 'browse' | 'planner' | 'health' | 'recent') => void;
+  currentView: 'today' | 'browse' | 'planner' | 'health' | 'recent' | 'project';
+  onViewChange: (view: 'today' | 'browse' | 'planner' | 'health' | 'recent' | 'project') => void;
 }
 
 export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
@@ -90,17 +90,31 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
       active: currentView === 'health',
       onClick: () => onViewChange('health'),
     },
-    { id: 'business', label: 'Business', icon: <BriefcaseBusiness className="w-4 h-4" /> },
-    { id: 'ai', label: 'AI', icon: <Sparkles className="w-4 h-4" /> },
-    { id: 'family', label: 'Family', icon: <Users className="w-4 h-4" /> },
-    { id: 'wealth', label: 'Wealth', icon: <TrendingUp className="w-4 h-4" /> },
-    { id: 'travel', label: 'Travel', icon: <Plane className="w-4 h-4" /> },
-    { id: 'routine', label: 'Routine', icon: <Repeat className="w-4 h-4" /> },
-    { id: 'trading', label: 'Trading', icon: <ChartCandlestick className="w-4 h-4" /> },
-    { id: 'car', label: 'Car', icon: <Car className="w-4 h-4" /> },
-    { id: 'work', label: 'Work', icon: <Folder className="w-4 h-4" /> },
-    { id: 'politics', label: 'Politics', icon: <Landmark className="w-4 h-4" /> },
-    { id: 'startup', label: 'Startup', icon: <Brain className="w-4 h-4" /> },
+    ...[
+      { id: 'business', label: 'Business', icon: <BriefcaseBusiness className="w-4 h-4" /> },
+      { id: 'ai', label: 'AI', icon: <Sparkles className="w-4 h-4" /> },
+      { id: 'family', label: 'Family', icon: <Users className="w-4 h-4" /> },
+      { id: 'wealth', label: 'Wealth', icon: <TrendingUp className="w-4 h-4" /> },
+      { id: 'travel', label: 'Travel', icon: <Plane className="w-4 h-4" /> },
+      { id: 'routine', label: 'Routine', icon: <Repeat className="w-4 h-4" /> },
+      { id: 'trading', label: 'Trading', icon: <ChartCandlestick className="w-4 h-4" /> },
+      { id: 'car', label: 'Car', icon: <Car className="w-4 h-4" /> },
+      { id: 'work', label: 'Work', icon: <Folder className="w-4 h-4" /> },
+      { id: 'politics', label: 'Politics', icon: <Landmark className="w-4 h-4" /> },
+      { id: 'startup', label: 'Startup', icon: <Brain className="w-4 h-4" /> },
+    ].map((item) => ({
+      ...item,
+      active: currentView === 'project' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('project') === item.id,
+      onClick: () => {
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          url.searchParams.set('view', 'project');
+          url.searchParams.set('project', item.id);
+          window.history.replaceState(null, '', url.toString());
+        }
+        onViewChange('project');
+      },
+    })),
   ];
 
   return (
@@ -160,7 +174,9 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
               <li key={item.id}>
                 <button
                   onClick={item.onClick}
-                  className={`w-full flex items-center ${collapsed ? 'justify-center px-3' : 'px-3'} py-2 rounded-lg text-sm transition-colors hover:bg-surface-variant text-on-surface`}
+                  className={`w-full flex items-center ${collapsed ? 'justify-center px-3' : 'px-3'} py-2 rounded-lg text-sm transition-colors ${
+                    item.active ? 'bg-active text-primary font-medium' : 'hover:bg-surface-variant text-on-surface'
+                  }`}
                   title={collapsed ? item.label : undefined}
                 >
                   <span className={item.active ? 'text-primary' : 'text-on-surface-variant'}>{item.icon}</span>

@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import FileBrowser from "@/components/FileBrowser";
 import HealthView from "@/components/HealthView";
 import PlannerView from "@/components/PlannerView";
+import ProjectView from "@/components/ProjectView";
 import RecentView from "@/components/RecentView";
 import SearchView from "@/components/SearchView";
 import Sidebar from "@/components/Sidebar";
@@ -12,24 +13,27 @@ import TodayView from "@/components/TodayView";
 import TopAppBar from "@/components/TopAppBar";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 
-type DashboardView = 'today' | 'browse' | 'planner' | 'health' | 'recent';
+type DashboardView = 'today' | 'browse' | 'planner' | 'health' | 'recent' | 'project';
 
 function parseView(value: string | null): DashboardView {
   if (value === 'vault') return 'browse';
-  if (value === 'planner' || value === 'health' || value === 'recent' || value === 'today') return value;
+  if (value === 'planner' || value === 'health' || value === 'recent' || value === 'today' || value === 'project') return value;
   return 'today';
 }
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<DashboardView>('today');
   const [searchQuery, setSearchQuery] = useState('');
+  const [projectId, setProjectId] = useState('business');
   const isSearching = currentView === 'browse' && searchQuery.trim().length > 0;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const syncViewFromUrl = () => {
-      setCurrentView(parseView(new URLSearchParams(window.location.search).get('view')));
+      const params = new URLSearchParams(window.location.search);
+      setCurrentView(parseView(params.get('view')));
+      if (params.get('project')) setProjectId(params.get('project') || 'business');
     };
 
     syncViewFromUrl();
@@ -71,6 +75,8 @@ export default function Home() {
               <HealthView />
             ) : currentView === 'browse' ? (
               <FileBrowser />
+            ) : currentView === 'project' ? (
+              <ProjectView projectId={projectId} />
             ) : (
               <RecentView />
             )}

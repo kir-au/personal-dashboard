@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
+  ArrowRight,
   BriefcaseBusiness,
   CalendarDays,
   CheckCircle2,
@@ -62,6 +63,21 @@ interface HealthToday {
   openQuestions: string[];
 }
 
+interface RehabDay {
+  day: number;
+  date: string;
+  label: string;
+  kind: string;
+  title: string;
+  plan: string;
+}
+
+interface RehabPlan {
+  title: string;
+  todayDate: string;
+  today: RehabDay | null;
+}
+
 interface TimelineBlock {
   time: string;
   title: string;
@@ -78,7 +94,7 @@ interface ProjectContext {
   signal: string;
 }
 
-const timeline: TimelineBlock[] = [
+const baselineTimeline: TimelineBlock[] = [
   {
     time: 'Morning',
     title: 'Check in',
@@ -181,6 +197,7 @@ export default function TodayView() {
   const [planner, setPlanner] = useState<PlannerProjection | null>(null);
   const [resume, setResume] = useState<ResumeData | null>(null);
   const [health, setHealth] = useState<HealthToday | null>(null);
+  const [healthPlan, setHealthPlan] = useState<RehabPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [captureText, setCaptureText] = useState('');
   const [captureStatus, setCaptureStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -190,17 +207,33 @@ export default function TodayView() {
       fetch('/api/planner').then((res) => res.json()),
       fetch('/api/resume').then((res) => res.json()).catch(() => null),
       fetch('/api/health/today').then((res) => res.json()).catch(() => null),
+      fetch('/api/health/project').then((res) => res.json()).catch(() => null),
     ])
-      .then(([plannerData, resumeData, healthData]) => {
+      .then(([plannerData, resumeData, healthData, healthPlanData]) => {
         setPlanner(plannerData);
         setResume(resumeData);
         setHealth(healthData);
+        setHealthPlan(healthPlanData);
       })
       .finally(() => setLoading(false));
   }, []);
 
   const plannedTasks = useMemo(() => planner?.tasks ?? [], [planner]);
   const primaryTask = plannedTasks[0];
+  const healthDay = healthPlan?.today ?? null;
+  const healthLink = healthDay ? `/?view=health&day=${healthDay.day}` : '/?view=health';
+  const dayTimeline = useMemo(() => {
+    if (!healthDay) return baselineTimeline;
+    return baselineTimeline.map((block) => (
+      block.type === 'health'
+        ? {
+            ...block,
+            title: `Health: ${healthDay.title}`,
+            body: healthDay.plan,
+          }
+        : block
+    ));
+  }, [healthDay]);
 
   const saveCapture = async () => {
     const input = captureText.trim();
@@ -236,7 +269,7 @@ export default function TodayView() {
   }
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-4 pb-8">
+    <div className="flex w-full max-w-[1440px] flex-col gap-4 pb-8">
       <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
           <div>
@@ -244,9 +277,11 @@ export default function TodayView() {
               <CalendarDays className="h-5 w-5" />
               <span className="text-xs font-semibold uppercase tracking-wide">Today</span>
             </div>
-            <h2 className="text-2xl font-semibold text-on-surface">Start with one clear block.</h2>
+            <h2 className="text-2xl font-semibold text-on-surface">Today: one clear plan, then execute.</h2>
             <p className="mt-2 text-sm text-on-surface-variant" style={{ maxWidth: 760 }}>
-              {primaryTask?.title ?? resume?.dailyBrief?.doFirst ?? 'Pick one useful action and schedule it before the day fills itself.'}
+              {healthDay
+                ? `Health is already planned: ${healthDay.title} / ${healthDay.plan}`
+                : primaryTask?.title ?? resume?.dailyBrief?.doFirst ?? 'Pick one useful action and schedule it before the day fills itself.'}
             </p>
           </div>
 
@@ -295,7 +330,7 @@ export default function TodayView() {
           </div>
 
           <div className="space-y-3">
-            {timeline.map((block) => (
+            {dayTimeline.map((block) => (
               <div key={`${block.time}-${block.title}`} className="grid grid-cols-[88px_1fr] gap-3">
                 <div className="pt-3 text-xs font-medium text-on-surface-variant">{block.time}</div>
                 <div className={`rounded-lg border p-3 ${typeColor[block.type]}`}>
@@ -304,7 +339,17 @@ export default function TodayView() {
                       <h4 className="text-sm font-semibold text-on-surface">{block.title}</h4>
                       <p className="mt-1 text-sm text-on-surface-variant">{block.body}</p>
                     </div>
-                    <Circle className="mt-0.5 h-4 w-4 text-on-surface-variant" />
+                    {block.type === 'health' && healthDay ? (
+                      <a
+                        href={healthLink}
+                        className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
+                      >
+                        Open
+                        <ArrowRight className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      <Circle className="mt-0.5 h-4 w-4 text-on-surface-variant" />
+                    )}
                   </div>
                 </div>
               </div>
@@ -318,14 +363,30 @@ export default function TodayView() {
               <div className="mb-3 flex items-center gap-2">
                 <HeartPulse className="h-4 w-4 text-rose-500" />
                 <div>
-                  <h3 className="text-base font-semibold text-on-surface">Health today</h3>
+                  <h3 className="text-base font-semibold text-on-surface">Health commitment</h3>
                   <p className="text-xs text-on-surface-variant">{health.activeProject.title} / {health.activeProject.status}</p>
                 </div>
               </div>
               <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
-                <p className="text-sm font-semibold text-on-surface">{health.today.primaryAction}</p>
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-on-surface">
+                      {healthDay ? `Day ${healthDay.day}: ${healthDay.title}` : health.today.primaryAction}
+                    </p>
+                    {healthDay && (
+                      <p className="mt-1 text-sm text-on-surface-variant">{healthDay.plan}</p>
+                    )}
+                  </div>
+                  <a
+                    href={healthLink}
+                    className="inline-flex shrink-0 items-center gap-1 rounded border border-rose-200 bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
+                  >
+                    Open
+                    <ArrowRight className="h-3 w-3" />
+                  </a>
+                </div>
                 <ul className="mt-2 space-y-1">
-                  {health.today.details.slice(0, 4).map((item) => (
+                  {(healthDay ? healthDay.plan.split(';').map((item) => item.trim()).filter(Boolean) : health.today.details).slice(0, 4).map((item) => (
                     <li key={item} className="flex gap-2 text-sm text-on-surface-variant">
                       <span className="mt-2 h-1.5 w-1.5 rounded-full bg-rose-500" />
                       <span>{item}</span>
