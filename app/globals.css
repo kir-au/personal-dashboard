@@ -387,3 +387,55 @@ html[data-theme="dark"] {
 .dark .markdown-content .hljs-emphasis {
   @apply italic;
 }
+
+html[data-theme="light"] .markdown-content {
+  color: var(--on-surface);
+}
+
+html[data-theme="light"] .markdown-content h1,
+html[data-theme="light"] .markdown-content h2,
+html[data-theme="light"] .markdown-content h3,
+html[data-theme="light"] .markdown-content h4,
+html[data-theme="light"] .markdown-content h5,
+html[data-theme="light"] .markdown-content h6,
+html[data-theme="light"] .markdown-content p,
+html[data-theme="light"] .markdown-content li,
+html[data-theme="light"] .markdown-content td,
+html[data-theme="light"] .markdown-content th {
+  color: var(--on-surface);
+}
+
+html[data-theme="light"] .markdown-content h1 {
+  border-color: var(--border);
+}
+
+html[data-theme="light"] .markdown-content blockquote {
+  background: var(--surface-variant);
+  border-color: var(--border);
+  color: var(--on-surface-variant);
+}
+
+html[data-theme="light"] .markdown-content code {
+  background: var(--hover);
+  color: var(--on-surface);
+}
+
+html[data-theme="light"] .markdown-content pre,
+html[data-theme="light"] .markdown-content pre code,
+html[data-theme="light"] .markdown-content .hljs {
+  background: #f8f9fa;
+  color: #202124;
+}
+
+html[data-theme="light"] .markdown-content th {
+  background: var(--surface-variant);
+  border-color: var(--border);
+}
+
+html[data-theme="light"] .markdown-content td {
+  border-color: var(--border);
+}
+
+html[data-theme="light"] .markdown-content tr:nth-child(even) {
+  background: var(--surface-variant);
+}

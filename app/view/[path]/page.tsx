@@ -50,7 +50,7 @@ export default function MarkdownViewerPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white dark:bg-black p-4 md:p-8">
+      <div className="min-h-screen bg-background p-4 md:p-8">
         <div className="max-w-4xl mx-auto">
           <Skeleton className="h-8 w-3/4 mb-4" />
           <Skeleton className="h-4 w-1/2 mb-8" />
@@ -66,12 +66,12 @@ export default function MarkdownViewerPage() {
 
   if (error || !file) {
     return (
-      <div className="min-h-screen bg-white dark:bg-black p-4 md:p-8 flex items-center justify-center">
+      <div className="min-h-screen bg-background p-4 md:p-8 flex items-center justify-center">
         <div className="max-w-4xl mx-auto text-center">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">
+          <h1 className="text-2xl font-bold text-on-surface mb-4">
             Error Loading File
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">
+          <p className="text-on-surface-variant mb-6">
             {error || 'File not found'}
           </p>
           <a
@@ -86,16 +86,16 @@ export default function MarkdownViewerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-black">
+    <div className="min-h-screen bg-background">
       {/* Minimal header with just file path */}
-      <div className="sticky top-0 z-10 bg-white/95 dark:bg-black/95 backdrop-blur-sm border-b border-gray-200 dark:border-gray-800 px-4 py-3">
+      <div className="sticky top-0 z-10 bg-surface/95 backdrop-blur-sm border-b border-border px-4 py-3">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between">
             <div className="truncate">
-              <h1 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+              <h1 className="text-sm font-medium text-on-surface truncate">
                 {file.name}
               </h1>
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              <p className="text-xs text-on-surface-variant truncate">
                 {file.path}
               </p>
             </div>
@@ -112,7 +112,7 @@ export default function MarkdownViewerPage() {
       {/* Clean markdown content */}
       <div className="p-4 md:p-8">
         <div className="max-w-4xl mx-auto">
-          <div className="prose prose-lg dark:prose-invert max-w-none">
+          <div className="prose prose-lg max-w-none">
             <MarkdownRenderer 
               content={file.content} 
               className="min-h-[calc(100vh-120px)]"
@@ -120,7 +120,7 @@ export default function MarkdownViewerPage() {
           </div>
 
           {/* Minimal footer with basic info */}
-          <div className="mt-8 pt-4 border-t border-gray-200 dark:border-gray-800 text-sm text-gray-500 dark:text-gray-400">
+          <div className="mt-8 pt-4 border-t border-border text-sm text-on-surface-variant">
             <div className="flex flex-wrap gap-4">
               <span>Size: {formatFileSize(file.size)}</span>
               <span>Modified: {formatDate(file.modified)}</span>
