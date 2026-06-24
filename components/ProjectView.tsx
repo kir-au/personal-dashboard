@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import {
   Brain,
   BriefcaseBusiness,
@@ -16,6 +17,26 @@ import {
 
 interface ProjectViewProps {
   projectId: string;
+}
+
+interface ProjectPlanDay {
+  day: number;
+  date: string;
+  label: string;
+  kind: string;
+  title: string;
+  plan: string;
+  output?: string;
+}
+
+interface ProjectPlan {
+  title: string;
+  goal: string;
+  rule: string;
+  todayDate: string;
+  today: ProjectPlanDay | null;
+  upcoming: ProjectPlanDay | null;
+  days: ProjectPlanDay[];
 }
 
 const projects: Record<string, { title: string; icon: React.ReactNode; summary: string; next: string; status: string }> = {
@@ -100,6 +121,18 @@ const projects: Record<string, { title: string; icon: React.ReactNode; summary: 
 
 export default function ProjectView({ projectId }: ProjectViewProps) {
   const project = projects[projectId] || projects.business;
+  const [aiPlan, setAiPlan] = useState<ProjectPlan | null>(null);
+
+  useEffect(() => {
+    if (projectId !== 'ai') return;
+    fetch('/api/projects/ai-publishing')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.error) setAiPlan(data);
+      })
+      .catch(() => {});
+  }, [projectId]);
+  const activeDay = aiPlan?.today ?? aiPlan?.upcoming ?? null;
 
   return (
     <div className="flex w-full max-w-[1440px] flex-col gap-4 pb-8">
@@ -109,9 +142,9 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
           <span className="text-xs font-semibold uppercase tracking-wide">Project / Life Area</span>
         </div>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
+          <div className="min-w-0" style={{ width: 'min(760px, 100%)' }}>
             <h2 className="text-2xl font-semibold text-on-surface">{project.title}</h2>
-            <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">{project.summary}</p>
+            <p className="mt-2 text-sm text-on-surface-variant">{project.summary}</p>
           </div>
           <span className="w-fit rounded border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
             {project.status}
@@ -121,8 +154,60 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
 
       <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <h3 className="text-base font-semibold text-on-surface">Next useful step</h3>
-        <p className="mt-2 text-sm text-on-surface-variant">{project.next}</p>
+        <p className="mt-2 text-sm text-on-surface-variant">{activeDay?.plan ?? project.next}</p>
       </section>
+
+      {projectId === 'ai' && aiPlan && (
+        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0" style={{ width: 'min(760px, 100%)' }}>
+              <h3 className="text-base font-semibold text-on-surface">{aiPlan.title}</h3>
+              <p className="mt-1 text-sm text-on-surface-variant">{aiPlan.goal}</p>
+            </div>
+            {activeDay && (
+              <span className="w-fit rounded border border-primary/30 bg-active px-3 py-1.5 text-xs font-medium text-primary">
+                {aiPlan.today ? 'Today' : 'Next'}: Day {activeDay.day}
+              </span>
+            )}
+          </div>
+          <div className="rounded-lg border-l-4 border-orange-500 bg-orange-50 px-3 py-2">
+            <p className="text-sm text-on-surface"><strong>Rule:</strong> {aiPlan.rule}</p>
+          </div>
+          <div className="mt-4 overflow-hidden rounded-lg border border-border">
+            <div className="grid grid-cols-[84px_120px_120px_1fr] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
+              <div>Day</div>
+              <div>Date</div>
+              <div>Type</div>
+              <div>Plan</div>
+            </div>
+            {aiPlan.days.map((day) => {
+              const isActive = day.day === activeDay?.day;
+              const isPast = day.date < aiPlan.todayDate;
+              return (
+                <div
+                  key={day.day}
+                  className={`grid grid-cols-[84px_120px_120px_1fr] border-t border-border px-3 py-3 text-sm ${
+                    isActive ? 'bg-active' : isPast ? 'bg-surface text-on-surface-variant opacity-70' : 'bg-surface'
+                  }`}
+                >
+                  <div className="font-semibold text-on-surface">Day {day.day}</div>
+                  <div className="text-on-surface-variant">{day.label}</div>
+                  <div>
+                    <span className="rounded border border-border bg-surface-variant px-2 py-0.5 text-xs text-on-surface-variant">
+                      {day.kind}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="font-medium text-on-surface">{day.title}</p>
+                    <p className="mt-1 text-on-surface-variant">{day.plan}</p>
+                    {day.output && <p className="mt-2 text-xs text-on-surface-variant"><strong>Output:</strong> {day.output}</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <h3 className="text-base font-semibold text-on-surface">Vault connection</h3>

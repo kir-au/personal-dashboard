@@ -78,11 +78,28 @@ interface RehabPlan {
   today: RehabDay | null;
 }
 
+interface PublishingDay {
+  day: number;
+  date: string;
+  label: string;
+  kind: string;
+  title: string;
+  plan: string;
+  output: string;
+}
+
+interface PublishingPlan {
+  title: string;
+  todayDate: string;
+  today: PublishingDay | null;
+  upcoming: PublishingDay | null;
+}
+
 interface TimelineBlock {
   time: string;
   title: string;
   body: string;
-  type: 'checkin' | 'focus' | 'health' | 'family' | 'admin';
+type: 'checkin' | 'focus' | 'health' | 'family' | 'admin';
 }
 
 interface ProjectContext {
@@ -198,6 +215,7 @@ export default function TodayView() {
   const [resume, setResume] = useState<ResumeData | null>(null);
   const [health, setHealth] = useState<HealthToday | null>(null);
   const [healthPlan, setHealthPlan] = useState<RehabPlan | null>(null);
+  const [publishingPlan, setPublishingPlan] = useState<PublishingPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [captureText, setCaptureText] = useState('');
   const [captureStatus, setCaptureStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -208,12 +226,14 @@ export default function TodayView() {
       fetch('/api/resume').then((res) => res.json()).catch(() => null),
       fetch('/api/health/today').then((res) => res.json()).catch(() => null),
       fetch('/api/health/project').then((res) => res.json()).catch(() => null),
+      fetch('/api/projects/ai-publishing').then((res) => res.json()).catch(() => null),
     ])
-      .then(([plannerData, resumeData, healthData, healthPlanData]) => {
+      .then(([plannerData, resumeData, healthData, healthPlanData, publishingPlanData]) => {
         setPlanner(plannerData);
         setResume(resumeData);
         setHealth(healthData);
         setHealthPlan(healthPlanData);
+        setPublishingPlan(publishingPlanData);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -222,9 +242,24 @@ export default function TodayView() {
   const primaryTask = plannedTasks[0];
   const healthDay = healthPlan?.today ?? null;
   const healthLink = healthDay ? `/?view=health&day=${healthDay.day}` : '/?view=health';
+  const publishingDay = publishingPlan?.today ?? publishingPlan?.upcoming ?? null;
+  const publishingIsToday = Boolean(publishingPlan?.today);
+  const publishingLink = '/?view=project&project=ai';
   const dayTimeline = useMemo(() => {
-    if (!healthDay) return baselineTimeline;
-    return baselineTimeline.map((block) => (
+    let blocks = baselineTimeline;
+    if (publishingDay) {
+      blocks = blocks.map((block) => (
+        block.type === 'focus'
+          ? {
+              ...block,
+              title: `${publishingIsToday ? 'AI publishing' : 'Tomorrow'}: ${publishingDay.title}`,
+              body: publishingDay.plan,
+            }
+          : block
+      ));
+    }
+    if (!healthDay) return blocks;
+    return blocks.map((block) => (
       block.type === 'health'
         ? {
             ...block,
@@ -233,7 +268,7 @@ export default function TodayView() {
           }
         : block
     ));
-  }, [healthDay]);
+  }, [healthDay, publishingDay, publishingIsToday]);
 
   const saveCapture = async () => {
     const input = captureText.trim();
@@ -279,7 +314,9 @@ export default function TodayView() {
             </div>
             <h2 className="text-2xl font-semibold text-on-surface">Today: one clear plan, then execute.</h2>
             <p className="mt-2 text-sm text-on-surface-variant" style={{ maxWidth: 760 }}>
-              {healthDay
+              {publishingDay && !publishingIsToday
+                ? `Tomorrow is already planned: ${publishingDay.title}. ${publishingDay.plan}`
+                : healthDay
                 ? `Health is already planned: ${healthDay.title} / ${healthDay.plan}`
                 : primaryTask?.title ?? resume?.dailyBrief?.doFirst ?? 'Pick one useful action and schedule it before the day fills itself.'}
             </p>
@@ -339,7 +376,15 @@ export default function TodayView() {
                       <h4 className="text-sm font-semibold text-on-surface">{block.title}</h4>
                       <p className="mt-1 text-sm text-on-surface-variant">{block.body}</p>
                     </div>
-                    {block.type === 'health' && healthDay ? (
+                    {block.type === 'focus' && publishingDay ? (
+                      <a
+                        href={publishingLink}
+                        className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
+                      >
+                        Open
+                        <ArrowRight className="h-3 w-3" />
+                      </a>
+                    ) : block.type === 'health' && healthDay ? (
                       <a
                         href={healthLink}
                         className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
@@ -358,6 +403,39 @@ export default function TodayView() {
         </section>
 
         <aside className="flex flex-col gap-4">
+          {publishingDay && (
+            <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+              <div className="mb-3 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <div>
+                  <h3 className="text-base font-semibold text-on-surface">
+                    {publishingIsToday ? 'AI publishing today' : 'AI publishing tomorrow'}
+                  </h3>
+                  <p className="text-xs text-on-surface-variant">{publishingPlan?.title}</p>
+                </div>
+              </div>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-on-surface">
+                      Day {publishingDay.day}: {publishingDay.title}
+                    </p>
+                    <p className="mt-1 text-sm text-on-surface-variant">{publishingDay.plan}</p>
+                  </div>
+                  <a
+                    href={publishingLink}
+                    className="inline-flex shrink-0 items-center gap-1 rounded border border-blue-200 bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
+                  >
+                    Open
+                    <ArrowRight className="h-3 w-3" />
+                  </a>
+                </div>
+                <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-on-surface-variant">Output</p>
+                <p className="mt-1 text-sm text-on-surface-variant">{publishingDay.output}</p>
+              </div>
+            </section>
+          )}
+
           {health && (
             <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
               <div className="mb-3 flex items-center gap-2">
