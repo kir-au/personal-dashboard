@@ -1,0 +1,389 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #202124;
+  --primary: #1a73e8;
+  --primary-dark: #0d47a1;
+  --surface: #ffffff;
+  --surface-variant: #f8f9fa;
+  --on-surface: #202124;
+  --on-surface-variant: #5f6368;
+  --border: #dadce0;
+  --hover: #f1f3f4;
+  --active: #e8f0fe;
+  --error: #d93025;
+  --success: #1e8e3e;
+  --warning: #f9ab00;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-dark: var(--primary-dark);
+  --color-surface: var(--surface);
+  --color-surface-variant: var(--surface-variant);
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-border: var(--border);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-error: var(--error);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  
+  --font-sans: 'Roboto', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Roboto Mono', 'Consolas', 'Monaco', monospace;
+  
+  --radius-sm: 4px;
+  --radius-md: 6px;  /* More compact */
+  --radius-lg: 8px;  /* More compact */
+  --radius-xl: 12px; /* More compact */
+  --radius-full: 9999px;
+  
+  --shadow-sm: 0 1px 2px 0 rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
+  --shadow-md: 0 1px 3px 0 rgba(60, 64, 67, 0.3), 0 4px 8px 3px rgba(60, 64, 67, 0.15);
+  --shadow-lg: 0 2px 6px 2px rgba(60, 64, 67, 0.15), 0 1px 2px 0 rgba(60, 64, 67, 0.3);
+  --shadow-xl: 0 4px 8px 3px rgba(60, 64, 67, 0.15), 0 1px 3px 0 rgba(60, 64, 67, 0.3);
+  
+  /* More compact spacing */
+  --spacing-xs: 2px;
+  --spacing-sm: 4px;
+  --spacing-md: 6px;
+  --spacing-lg: 8px;
+  --spacing-xl: 12px;
+  --spacing-2xl: 16px;
+  --spacing-3xl: 24px;
+}
+
+html[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #202124;
+  --primary: #1a73e8;
+  --primary-dark: #0d47a1;
+  --surface: #ffffff;
+  --surface-variant: #f8f9fa;
+  --on-surface: #202124;
+  --on-surface-variant: #5f6368;
+  --border: #dadce0;
+  --hover: #f1f3f4;
+  --active: #e8f0fe;
+  --error: #d93025;
+  --success: #1e8e3e;
+  --warning: #f9ab00;
+}
+
+html[data-theme="dark"] {
+  --background: #202124;
+  --foreground: #e8eaed;
+  --surface: #292a2d;
+  --surface-variant: #3c4043;
+  --on-surface: #e8eaed;
+  --on-surface-variant: #9aa0a6;
+  --border: #5f6368;
+  --hover: #3c4043;
+  --active: #41331c;
+  --primary: #8ab4f8;
+  --primary-dark: #669df6;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 13px; /* Slightly smaller for compactness */
+  line-height: 1.4286;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Compact file browser rows */
+.file-row-compact {
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+  min-height: 48px !important; /* Reduced from 64px */
+}
+
+/* Compact buttons */
+.btn-compact {
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+}
+
+/* Compact sidebar items */
+.sidebar-item-compact {
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px; /* More compact */
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #bdc1c6;
+}
+
+html[data-theme="dark"] {
+  ::-webkit-scrollbar-thumb {
+    background: #5f6368;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: #80868b;
+  }
+}
+
+/* Selection */
+::selection {
+  background-color: rgba(26, 115, 232, 0.2);
+  color: inherit;
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px; /* More compact */
+}
+
+/* Utility classes */
+.line-clamp-1 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.line-clamp-2 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.line-clamp-3 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* Mobile responsiveness improvements */
+@media (max-width: 640px) {
+  .sm\:hidden {
+    display: none !important;
+  }
+  
+  .sm\:flex {
+    display: flex !important;
+  }
+  
+  .sm\:grid {
+    display: grid !important;
+  }
+  
+  .sm\:block {
+    display: block !important;
+  }
+  
+  /* Adjust spacing for mobile */
+  .p-6 {
+    padding: 0.75rem !important;
+  }
+  
+  .space-y-6 > * + * {
+    margin-top: 0.75rem !important;
+  }
+  
+  /* File browser mobile optimizations */
+  .file-item-mobile {
+    padding: 0.5rem !important;
+  }
+  
+  .file-icon-mobile {
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+    margin-right: 0.5rem !important;
+  }
+}
+
+/* Tablet responsiveness */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .md\:hidden {
+    display: none !important;
+  }
+  
+  .md\:flex {
+    display: flex !important;
+  }
+  
+  .md\:grid {
+    display: grid !important;
+  }
+}
+
+/* Touch-friendly tap targets */
+@media (hover: none) and (pointer: coarse) {
+  button, 
+  [role="button"],
+  a {
+    min-height: 40px; /* More compact */
+    min-width: 40px;
+  }
+  
+  input,
+  select,
+  textarea {
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Markdown content styles */
+.markdown-content {
+  @apply text-gray-900 dark:text-gray-100;
+}
+
+.markdown-content h1 {
+  @apply text-3xl font-bold mt-8 mb-4 pb-2 border-b border-gray-200 dark:border-gray-800;
+}
+
+.markdown-content h2 {
+  @apply text-2xl font-bold mt-6 mb-3;
+}
+
+.markdown-content h3 {
+  @apply text-xl font-bold mt-5 mb-2;
+}
+
+.markdown-content p {
+  @apply my-4 leading-relaxed;
+}
+
+.markdown-content a {
+  @apply text-blue-600 dark:text-blue-400 hover:underline;
+}
+
+.markdown-content ul, .markdown-content ol {
+  @apply my-4 pl-6;
+}
+
+.markdown-content ul {
+  @apply list-disc;
+}
+
+.markdown-content ol {
+  @apply list-decimal;
+}
+
+.markdown-content li {
+  @apply my-2;
+}
+
+.markdown-content blockquote {
+  @apply border-l-4 border-gray-300 dark:border-gray-700 pl-4 italic my-4 py-2 bg-gray-50 dark:bg-gray-900/50;
+}
+
+.markdown-content code {
+  @apply bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono;
+}
+
+.markdown-content pre {
+  @apply bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto my-4;
+}
+
+.markdown-content pre code {
+  @apply bg-transparent text-inherit p-0;
+}
+
+.markdown-content table {
+  @apply w-full border-collapse my-4;
+}
+
+.markdown-content th {
+  @apply bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-4 py-2 text-left font-semibold;
+}
+
+.markdown-content td {
+  @apply border border-gray-300 dark:border-gray-700 px-4 py-2;
+}
+
+.markdown-content tr:nth-child(even) {
+  @apply bg-gray-50 dark:bg-gray-900/30;
+}
+
+.markdown-content img {
+  @apply max-w-full h-auto rounded-lg my-4;
+}
+
+/* Syntax highlighting for dark theme */
+.dark .markdown-content pre {
+  @apply bg-gray-900;
+}
+
+.dark .markdown-content .hljs {
+  @apply bg-gray-900;
+}
+
+.dark .markdown-content .hljs-keyword,
+.dark .markdown-content .hljs-selector-tag,
+.dark .markdown-content .hljs-literal,
+.dark .markdown-content .hljs-section,
+.dark .markdown-content .hljs-link {
+  @apply text-blue-400;
+}
+
+.dark .markdown-content .hljs-string,
+.dark .markdown-content .hljs-title,
+.dark .markdown-content .hljs-name,
+.dark .markdown-content .hljs-type,
+.dark .markdown-content .hljs-attribute,
+.dark .markdown-content .hljs-symbol,
+.dark .markdown-content .hljs-bullet,
+.dark .markdown-content .hljs-addition,
+.dark .markdown-content .hljs-variable,
+.dark .markdown-content .hljs-template-tag,
+.dark .markdown-content .hljs-template-variable {
+  @apply text-green-400;
+}
+
+.dark .markdown-content .hljs-comment,
+.dark .markdown-content .hljs-quote,
+.dark .markdown-content .hljs-deletion,
+.dark .markdown-content .hljs-meta {
+  @apply text-gray-500;
+}
+
+.dark .markdown-content .hljs-keyword,
+.dark .markdown-content .hljs-selector-tag,
+.dark .markdown-content .hljs-literal,
+.dark .markdown-content .hljs-title,
+.dark .markdown-content .hljs-section,
+.dark .markdown-content .hljs-doctag,
+.dark .markdown-content .hljs-type,
+.dark .markdown-content .hljs-name,
+.dark .markdown-content .hljs-strong {
+  @apply font-bold;
+}
+
+.dark .markdown-content .hljs-emphasis {
+  @apply italic;
+}

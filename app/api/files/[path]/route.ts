@@ -1,0 +1,65 @@
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs/promises';
+import path from 'path';
+import matter from 'gray-matter';
+
+const VAULT_PATH = path.join(process.env.HOME || '', 'personal-vault');
+
+function safeJoinVault(relativePath: string) {
+  const normalized = path.normalize(relativePath || '').replace(/^(\.\.(\/|\\|$))+/, '');
+  const fullPath = path.join(VAULT_PATH, normalized);
+  if (!fullPath.startsWith(VAULT_PATH)) {
+    throw new Error('Access denied');
+  }
+  return { fullPath, decodedPath: path.relative(VAULT_PATH, fullPath) };
+}
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string }> }
+) {
+  try {
+    const { path: filePath } = await params;
+    
+    // Decode URL components and join them
+    const { fullPath, decodedPath } = safeJoinVault(decodeURIComponent(filePath));
+
+    // Check if file exists
+    try {
+      await fs.access(fullPath);
+    } catch {
+      return NextResponse.json({ 
+        error: 'File not found',
+        path: decodedPath
+      }, { status: 404 });
+    }
+
+    // Read file content
+    const content = await fs.readFile(fullPath, 'utf-8');
+    
+    // Parse frontmatter
+    const { data: frontmatter, content: markdownContent } = matter(content);
+    
+    // Get file stats
+    const stats = await fs.stat(fullPath);
+
+    return NextResponse.json({
+      path: decodedPath,
+      fullPath,
+      frontmatter,
+      content: markdownContent,
+      rawContent: content,
+      stats: {
+        size: stats.size,
+        mtime: stats.mtimeMs,
+        ctime: stats.ctimeMs
+      }
+    });
+  } catch (error) {
+    console.error('Error reading file:', error);
+    return NextResponse.json({ 
+      error: 'Failed to read file',
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
+  }
+}
