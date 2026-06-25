@@ -221,21 +221,52 @@ export default function TodayView() {
   const [captureStatus, setCaptureStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/planner').then((res) => res.json()),
-      fetch('/api/resume').then((res) => res.json()).catch(() => null),
-      fetch('/api/health/today').then((res) => res.json()).catch(() => null),
-      fetch('/api/health/project').then((res) => res.json()).catch(() => null),
-      fetch('/api/projects/ai-publishing').then((res) => res.json()).catch(() => null),
-    ])
-      .then(([plannerData, resumeData, healthData, healthPlanData, publishingPlanData]) => {
+    let cancelled = false;
+
+    const loadToday = async (showLoading = false) => {
+      if (showLoading) setLoading(true);
+      const fetchOptions: RequestInit = { cache: 'no-store' };
+      const cacheBust = `t=${Date.now()}`;
+
+      const [plannerData, resumeData, healthData, healthPlanData, publishingPlanData] = await Promise.all([
+        fetch(`/api/planner?${cacheBust}`, fetchOptions).then((res) => res.json()),
+        fetch(`/api/resume?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
+        fetch(`/api/health/today?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
+        fetch(`/api/health/project?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
+        fetch(`/api/projects/ai-publishing?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
+      ]);
+
+      if (!cancelled) {
         setPlanner(plannerData);
         setResume(resumeData);
         setHealth(healthData);
         setHealthPlan(healthPlanData);
         setPublishingPlan(publishingPlanData);
-      })
-      .finally(() => setLoading(false));
+        setLoading(false);
+      }
+    };
+
+    loadToday(true).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+
+    const refreshOnFocus = () => {
+      loadToday(false).catch(() => {});
+    };
+    const refreshOnVisible = () => {
+      if (document.visibilityState === 'visible') refreshOnFocus();
+    };
+    const interval = window.setInterval(refreshOnFocus, 5 * 60 * 1000);
+
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnVisible);
+    };
   }, []);
 
   const plannedTasks = useMemo(() => planner?.tasks ?? [], [planner]);
