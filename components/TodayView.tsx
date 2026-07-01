@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
+  ArrowLeft,
   ArrowRight,
   BriefcaseBusiness,
   CalendarDays,
@@ -70,12 +71,26 @@ interface RehabDay {
   kind: string;
   title: string;
   plan: string;
+  completed?: boolean;
+  completionStatus?: 'partial' | 'completed';
+  actual?: {
+    summary?: string;
+    completed?: Array<{
+      code: string;
+      name: string;
+      load: string | null;
+      sets: number | null;
+      reps: number | null;
+    }>;
+    remaining?: string[];
+  };
 }
 
 interface RehabPlan {
   title: string;
   todayDate: string;
   today: RehabDay | null;
+  days?: RehabDay[];
 }
 
 interface PublishingDay {
@@ -93,6 +108,7 @@ interface PublishingPlan {
   todayDate: string;
   today: PublishingDay | null;
   upcoming: PublishingDay | null;
+  days?: PublishingDay[];
 }
 
 interface TimelineBlock {
@@ -111,6 +127,22 @@ interface ProjectContext {
   signal: string;
 }
 
+interface CaptureAction {
+  id: string;
+  label: string;
+  description: string;
+}
+
+interface CaptureResult {
+  path: string;
+  routing: {
+    intent: string;
+    projectId?: string;
+    candidates: Array<{ id: string; title: string; score: number }>;
+    actions: CaptureAction[];
+  };
+}
+
 function formatDashboardDate(dateValue?: string | null) {
   const date = dateValue ? new Date(`${dateValue}T00:00:00`) : new Date();
 
@@ -120,6 +152,48 @@ function formatDashboardDate(dateValue?: string | null) {
     month: 'short',
     year: 'numeric',
   }).format(date);
+}
+
+function getSydneyDate() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Sydney',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function getInitialSelectedDate() {
+  if (typeof window === 'undefined') return getSydneyDate();
+  return new URLSearchParams(window.location.search).get('date') || getSydneyDate();
+}
+
+function addDays(dateValue: string, offset: number) {
+  const [year, month, day] = dateValue.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
+
+function minDate(values: string[]) {
+  return values.reduce((min, value) => (value < min ? value : min), values[0]);
+}
+
+function maxDate(values: string[]) {
+  return values.reduce((max, value) => (value > max ? value : max), values[0]);
+}
+
+function formatRelativeDay(dateValue: string, todayValue: string) {
+  const diff = Math.round(
+    (new Date(`${dateValue}T00:00:00`).getTime() - new Date(`${todayValue}T00:00:00`).getTime()) /
+      86_400_000
+  );
+
+  if (diff === 0) return 'Today';
+  if (diff === -1) return 'Yesterday';
+  if (diff === 1) return 'Tomorrow';
+  if (diff < 0) return `${Math.abs(diff)} days ago`;
+  return `In ${diff} days`;
 }
 
 const baselineTimeline: TimelineBlock[] = [
@@ -230,6 +304,10 @@ export default function TodayView() {
   const [loading, setLoading] = useState(true);
   const [captureText, setCaptureText] = useState('');
   const [captureStatus, setCaptureStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null);
+  const [captureActionStatus, setCaptureActionStatus] = useState<string | null>(null);
+  const [projectCreateStatus, setProjectCreateStatus] = useState<'idle' | 'saving' | 'error'>('idle');
+  const [selectedDate] = useState<string>(() => getInitialSelectedDate());
 
   useEffect(() => {
     let cancelled = false;
@@ -282,15 +360,43 @@ export default function TodayView() {
 
   const plannedTasks = useMemo(() => planner?.tasks ?? [], [planner]);
   const primaryTask = plannedTasks[0];
-  const healthDay = healthPlan?.today ?? null;
+  const todayDate = healthPlan?.todayDate ?? publishingPlan?.todayDate ?? getSydneyDate();
+  const healthDay = healthPlan?.days?.find((day) => day.date === selectedDate) ?? null;
   const healthLink = healthDay ? `/?view=health&day=${healthDay.day}` : '/?view=health';
-  const publishingDay = publishingPlan?.today ?? publishingPlan?.upcoming ?? null;
-  const publishingIsToday = Boolean(publishingPlan?.today);
+  const publishingDay =
+    publishingPlan?.days?.find((day) => day.date === selectedDate) ??
+    (selectedDate === todayDate ? publishingPlan?.upcoming ?? null : null);
+  const publishingIsToday = Boolean(publishingDay && selectedDate === todayDate);
   const publishingLink = '/?view=project&project=ai';
   const dashboardDate = useMemo(
-    () => formatDashboardDate(healthPlan?.todayDate ?? publishingPlan?.todayDate),
-    [healthPlan?.todayDate, publishingPlan?.todayDate]
+    () => formatDashboardDate(selectedDate),
+    [selectedDate]
   );
+  const dateBounds = useMemo(() => {
+    const dates = [
+      addDays(todayDate, -14),
+      addDays(todayDate, 14),
+      ...(healthPlan?.days?.map((day) => day.date) ?? []),
+      ...(publishingPlan?.days?.map((day) => day.date) ?? []),
+    ];
+
+    return {
+      min: minDate(dates),
+      max: maxDate(dates),
+    };
+  }, [healthPlan?.days, publishingPlan?.days, todayDate]);
+  const canGoPrevious = selectedDate > dateBounds.min;
+  const canGoNext = selectedDate < dateBounds.max;
+  const relativeDayLabel = formatRelativeDay(selectedDate, todayDate);
+  const dateNavButtonClass =
+    'inline-flex h-7 min-w-[68px] items-center justify-center gap-1 rounded border border-border bg-surface px-2 text-xs font-medium text-on-surface-variant hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
+  const dateHref = (dateValue: string) => {
+    if (typeof window === 'undefined') return `/?date=${dateValue}`;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('view');
+    url.searchParams.set('date', dateValue);
+    return `${url.pathname}${url.search}${url.hash}`;
+  };
   const dayTimeline = useMemo(() => {
     let blocks = baselineTimeline;
     if (publishingDay) {
@@ -298,7 +404,7 @@ export default function TodayView() {
         block.type === 'focus'
           ? {
               ...block,
-              title: `${publishingIsToday ? 'AI publishing' : 'Tomorrow'}: ${publishingDay.title}`,
+              title: `${publishingIsToday ? 'AI publishing' : relativeDayLabel}: ${publishingDay.title}`,
               body: publishingDay.plan,
             }
           : block
@@ -314,7 +420,7 @@ export default function TodayView() {
           }
         : block
     ));
-  }, [healthDay, publishingDay, publishingIsToday]);
+  }, [healthDay, publishingDay, publishingIsToday, relativeDayLabel]);
 
   const saveCapture = async () => {
     const input = captureText.trim();
@@ -333,9 +439,10 @@ export default function TodayView() {
       });
 
       if (!res.ok) throw new Error('Capture failed');
+      const data = await res.json();
       setCaptureText('');
+      setCaptureResult(data);
       setCaptureStatus('saved');
-      window.setTimeout(() => setCaptureStatus('idle'), 2500);
     } catch {
       setCaptureStatus('error');
     }
@@ -344,6 +451,53 @@ export default function TodayView() {
   const applyCheckInPreset = (text: string) => {
     setCaptureText(text);
     if (captureStatus !== 'idle') setCaptureStatus('idle');
+  };
+
+  const createProject = async () => {
+    const title = window.prompt('New project name');
+    if (!title?.trim()) return;
+
+    setProjectCreateStatus('saving');
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || 'Failed to create project');
+      window.dispatchEvent(new Event('projects-changed'));
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', 'project');
+      url.searchParams.set('project', data.project.id);
+      window.history.replaceState(null, '', url.toString());
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      setProjectCreateStatus('idle');
+    } catch {
+      setProjectCreateStatus('error');
+    }
+  };
+
+  const applyCaptureAction = async (action: CaptureAction) => {
+    if (!captureResult) return;
+    setCaptureActionStatus(`Applying ${action.label}...`);
+    try {
+      const response = await fetch('/api/capture/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: captureResult.path,
+          actionId: action.id,
+          projectId: captureResult.routing.projectId,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || 'Action failed');
+      setCaptureActionStatus(`${action.label} saved as pending.`);
+      window.setTimeout(() => setCaptureActionStatus(null), 2500);
+    } catch {
+      setCaptureActionStatus('Action failed.');
+    }
   };
 
   if (loading) {
@@ -358,21 +512,43 @@ export default function TodayView() {
     <div className="flex w-auto max-w-full min-w-0 flex-col gap-4 overflow-hidden pb-8 xl:w-full xl:max-w-[1440px]">
       <div className="grid w-full max-w-full min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
         <section className="w-full max-w-full min-w-0 rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-4 flex flex-col gap-3">
             <div className="min-w-0">
-              <div className="mb-2 flex items-center gap-2 text-primary">
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-primary">
                 <CalendarDays className="h-5 w-5" />
-                <span className="text-xs font-semibold uppercase tracking-wide">Today</span>
+                <span className="text-xs font-semibold uppercase tracking-wide">{relativeDayLabel}</span>
                 <span className="rounded border border-primary/20 bg-active px-2 py-0.5 text-xs font-medium text-primary">
                   {dashboardDate}
                 </span>
+                <div className="ml-0 flex flex-wrap items-center gap-1.5 sm:ml-2">
+                  <a
+                    href={dateHref(addDays(selectedDate, -1))}
+                    aria-disabled={!canGoPrevious}
+                    className={`${dateNavButtonClass} ${!canGoPrevious ? 'pointer-events-none opacity-40' : ''}`}
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Prev
+                  </a>
+                  <a
+                    href={dateHref(todayDate)}
+                    aria-disabled={selectedDate === todayDate}
+                    className={`${dateNavButtonClass} ${selectedDate === todayDate ? 'pointer-events-none opacity-40' : ''}`}
+                  >
+                    Today
+                  </a>
+                  <a
+                    href={dateHref(addDays(selectedDate, 1))}
+                    aria-disabled={!canGoNext}
+                    className={`${dateNavButtonClass} ${!canGoNext ? 'pointer-events-none opacity-40' : ''}`}
+                  >
+                    Next
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </a>
+                </div>
               </div>
               <h2 className="text-xl font-semibold text-on-surface">Day map</h2>
               <p className="text-sm text-on-surface-variant">Use the plan unless your state changed.</p>
             </div>
-            <span className="w-fit rounded-lg border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
-              flexible draft
-            </span>
           </div>
 
           <div className="space-y-3">
@@ -454,6 +630,7 @@ export default function TodayView() {
                   onChange={(event) => {
                     setCaptureText(event.target.value);
                     if (captureStatus !== 'idle') setCaptureStatus('idle');
+                    if (captureResult) setCaptureResult(null);
                   }}
                   rows={3}
                   placeholder="What changed? Energy, sleep, body, mood, main constraint..."
@@ -461,7 +638,7 @@ export default function TodayView() {
                 />
                 <div className="mt-2 flex items-center justify-between gap-3">
                   <span className="text-xs text-on-surface-variant">
-                    {captureStatus === 'saved' && 'Saved to vault inbox.'}
+                    {captureStatus === 'saved' && `Saved to ${captureResult?.path || 'vault'}.`}
                     {captureStatus === 'error' && 'Save failed.'}
                   </span>
                   <button
@@ -472,6 +649,30 @@ export default function TodayView() {
                     {captureStatus === 'saving' ? 'Saving...' : 'Save'}
                   </button>
                 </div>
+                {captureResult && (
+                  <div className="mt-3 rounded-lg border border-border bg-surface-variant p-3">
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-on-surface-variant">
+                      <span>Intent: {captureResult.routing.intent}</span>
+                      <span>/</span>
+                      <span>Project: {captureResult.routing.projectId || 'inbox'}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {captureResult.routing.actions.map((action) => (
+                        <button
+                          key={action.id}
+                          onClick={() => applyCaptureAction(action)}
+                          title={action.description}
+                          className="rounded border border-border bg-surface px-2 py-1 text-xs text-on-surface-variant hover:bg-hover"
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
+                    {captureActionStatus && (
+                      <p className="mt-2 text-xs text-on-surface-variant">{captureActionStatus}</p>
+                    )}
+                  </div>
+                )}
               </div>
             </details>
           </section>
@@ -482,7 +683,7 @@ export default function TodayView() {
                 <Sparkles className="h-4 w-4 text-primary" />
                 <div>
                   <h3 className="text-base font-semibold text-on-surface">
-                    {publishingIsToday ? 'AI publishing today' : 'AI publishing tomorrow'}
+                    {publishingIsToday ? 'AI publishing today' : `AI publishing ${relativeDayLabel.toLowerCase()}`}
                   </h3>
                   <p className="text-xs text-on-surface-variant">{publishingPlan?.title}</p>
                 </div>
@@ -512,13 +713,13 @@ export default function TodayView() {
           {health && (
             <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
               <div className="mb-3 flex items-center gap-2">
-                <HeartPulse className="h-4 w-4 text-rose-500" />
+                <HeartPulse className="h-4 w-4 text-amber-500" />
                 <div>
                   <h3 className="text-base font-semibold text-on-surface">Health commitment</h3>
                   <p className="text-xs text-on-surface-variant">{health.activeProject.title} / {health.activeProject.status}</p>
                 </div>
               </div>
-              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-on-surface">
@@ -530,23 +731,37 @@ export default function TodayView() {
                   </div>
                   <a
                     href={healthLink}
-                    className="inline-flex shrink-0 items-center gap-1 rounded border border-rose-200 bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
+                    className="inline-flex shrink-0 items-center gap-1 rounded border border-amber-200 bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
                   >
                     Open
                     <ArrowRight className="h-3 w-3" />
                   </a>
                 </div>
                 <ul className="mt-2 space-y-1">
-                  {(healthDay ? healthDay.plan.split(';').map((item) => item.trim()).filter(Boolean) : health.today.details).slice(0, 4).map((item) => (
+                  {(healthDay?.actual?.completed?.length
+                    ? healthDay.actual.completed.map((item) => `${item.code}: ${formatActualExercise(item)}`)
+                    : healthDay ? healthDay.plan.split(';').map((item) => item.trim()).filter(Boolean) : health.today.details
+                  ).slice(0, 5).map((item) => (
                     <li key={item} className="flex gap-2 text-sm text-on-surface-variant">
-                      <span className="mt-2 h-1.5 w-1.5 rounded-full bg-rose-500" />
+                      <span className={`mt-2 h-1.5 w-1.5 rounded-full ${healthDay?.actual?.completed?.length ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                       <span>{item}</span>
                     </li>
                   ))}
                 </ul>
+                {healthDay?.actual?.remaining?.length ? (
+                  <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    Still open: {healthDay.actual.remaining.join('; ')}
+                  </p>
+                ) : healthDay?.completed ? (
+                  <p className="mt-3 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
+                    Completed {relativeDayLabel.toLowerCase()}
+                  </p>
+                ) : null}
               </div>
               <div className="mt-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">Avoid today</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+                  Avoid {relativeDayLabel.toLowerCase()}
+                </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {health.today.avoid.slice(0, 6).map((item) => (
                     <span key={item} className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant">
@@ -598,10 +813,17 @@ export default function TodayView() {
             <h3 className="text-base font-semibold text-on-surface">Projects and life areas</h3>
             <p className="text-sm text-on-surface-variant">Context buckets from the vault. These become project pages later.</p>
           </div>
-          <button className="rounded-lg border border-border px-3 py-2 text-sm text-on-surface-variant hover:bg-surface-variant">
-            New project
+          <button
+            onClick={createProject}
+            disabled={projectCreateStatus === 'saving'}
+            className="rounded-lg border border-border px-3 py-2 text-sm text-on-surface-variant hover:bg-surface-variant disabled:opacity-50"
+          >
+            {projectCreateStatus === 'saving' ? 'Creating...' : 'New project'}
           </button>
         </div>
+        {projectCreateStatus === 'error' && (
+          <p className="mb-3 text-sm text-error">Could not create project.</p>
+        )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {projectContexts.map((project) => (
             <article key={project.id} className="rounded-lg border border-border bg-surface-variant p-3">
@@ -622,4 +844,12 @@ export default function TodayView() {
       </section>
     </div>
   );
+}
+
+function formatActualExercise(item: { load: string | null; sets: number | null; reps: number | null }) {
+  const parts = [];
+  if (item.load) parts.push(item.load);
+  if (item.sets) parts.push(`${item.sets} sets`);
+  if (item.reps) parts.push(`${item.reps} reps`);
+  return parts.length ? parts.join(' / ') : 'done';
 }

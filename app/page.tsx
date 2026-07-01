@@ -47,6 +47,9 @@ export default function Home() {
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.set('view', view === 'browse' ? 'vault' : view);
+      if (view === 'project') {
+        setProjectId(url.searchParams.get('project') || projectId);
+      }
       window.history.replaceState(null, '', url.toString());
     }
     if (view !== 'browse') {

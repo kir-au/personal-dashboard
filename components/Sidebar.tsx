@@ -21,6 +21,7 @@ import {
   X
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import type { CSSProperties } from 'react';
 
 interface SidebarItem {
   id: string;
@@ -38,10 +39,44 @@ interface SidebarProps {
   onMobileClose?: () => void;
 }
 
+interface ProjectRecord {
+  id: string;
+  title: string;
+  icon?: string;
+}
+
+function projectIcon(name?: string) {
+  const className = "w-4 h-4";
+  switch (name) {
+    case 'health': return <Dumbbell className={className} />;
+    case 'business': return <BriefcaseBusiness className={className} />;
+    case 'ai': return <Sparkles className={className} />;
+    case 'family': return <Users className={className} />;
+    case 'wealth': return <TrendingUp className={className} />;
+    case 'travel': return <Plane className={className} />;
+    case 'routine': return <Repeat className={className} />;
+    case 'trading': return <ChartCandlestick className={className} />;
+    case 'car': return <Car className={className} />;
+    case 'work': return <Folder className={className} />;
+    case 'politics': return <Landmark className={className} />;
+    case 'startup': return <Brain className={className} />;
+    default: return <Folder className={className} />;
+  }
+}
+
 export default function Sidebar({ currentView, onViewChange, mobileOpen = false, onMobileClose }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(256);
   const [recentCount, setRecentCount] = useState<number | undefined>(undefined);
-  const drawerCollapsed = collapsed && !mobileOpen;
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const drawerCollapsed = sidebarWidth < 132 && !mobileOpen;
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem('personal-dashboard-sidebar-width');
+    const parsed = saved ? Number(saved) : NaN;
+    if (Number.isFinite(parsed)) {
+      setSidebarWidth(Math.min(320, Math.max(64, parsed)));
+    }
+  }, []);
 
   useEffect(() => {
     fetch('/api/recent?limit=1')
@@ -52,6 +87,50 @@ export default function Sidebar({ currentView, onViewChange, mobileOpen = false,
         }
       })
       .catch(() => {}); // Silent fail
+  }, []);
+
+  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (mobileOpen) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const nextWidth = Math.min(320, Math.max(64, startWidth + moveEvent.clientX - startX));
+      setSidebarWidth(nextWidth);
+      window.localStorage.setItem('personal-dashboard-sidebar-width', String(nextWidth));
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+  };
+
+  const toggleCompactWidth = () => {
+    const nextWidth = drawerCollapsed ? 256 : 72;
+    setSidebarWidth(nextWidth);
+    window.localStorage.setItem('personal-dashboard-sidebar-width', String(nextWidth));
+  };
+
+  useEffect(() => {
+    const loadProjects = () => {
+      fetch('/api/projects')
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data.projects)) setProjects(data.projects);
+        })
+        .catch(() => {});
+    };
+
+    loadProjects();
+    window.addEventListener('projects-changed', loadProjects);
+    return () => window.removeEventListener('projects-changed', loadProjects);
   }, []);
 
   const mainItems: SidebarItem[] = [
@@ -98,44 +177,29 @@ export default function Sidebar({ currentView, onViewChange, mobileOpen = false,
     },
   ];
 
-  const contextItems: SidebarItem[] = [
-    {
-      id: 'health',
-      label: 'Health',
-      icon: <Dumbbell className="w-4 h-4" />,
-      active: currentView === 'health',
-      onClick: () => {
+  const contextItems: SidebarItem[] = projects.map((project) => ({
+    id: project.id,
+    label: project.title,
+    icon: projectIcon(project.icon || project.id),
+    active: project.id === 'health'
+      ? currentView === 'health'
+      : currentView === 'project' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('project') === project.id,
+    onClick: () => {
+      if (project.id === 'health') {
         onViewChange('health');
         onMobileClose?.();
-      },
+        return;
+      }
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('view', 'project');
+        url.searchParams.set('project', project.id);
+        window.history.replaceState(null, '', url.toString());
+      }
+      onViewChange('project');
+      onMobileClose?.();
     },
-    ...[
-      { id: 'business', label: 'Business', icon: <BriefcaseBusiness className="w-4 h-4" /> },
-      { id: 'ai', label: 'AI', icon: <Sparkles className="w-4 h-4" /> },
-      { id: 'family', label: 'Family', icon: <Users className="w-4 h-4" /> },
-      { id: 'wealth', label: 'Wealth', icon: <TrendingUp className="w-4 h-4" /> },
-      { id: 'travel', label: 'Travel', icon: <Plane className="w-4 h-4" /> },
-      { id: 'routine', label: 'Routine', icon: <Repeat className="w-4 h-4" /> },
-      { id: 'trading', label: 'Trading', icon: <ChartCandlestick className="w-4 h-4" /> },
-      { id: 'car', label: 'Car', icon: <Car className="w-4 h-4" /> },
-      { id: 'work', label: 'Work', icon: <Folder className="w-4 h-4" /> },
-      { id: 'politics', label: 'Politics', icon: <Landmark className="w-4 h-4" /> },
-      { id: 'startup', label: 'Startup', icon: <Brain className="w-4 h-4" /> },
-    ].map((item) => ({
-      ...item,
-      active: currentView === 'project' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('project') === item.id,
-      onClick: () => {
-        if (typeof window !== 'undefined') {
-          const url = new URL(window.location.href);
-          url.searchParams.set('view', 'project');
-          url.searchParams.set('project', item.id);
-          window.history.replaceState(null, '', url.toString());
-        }
-        onViewChange('project');
-        onMobileClose?.();
-      },
-    })),
-  ];
+  }));
 
   return (
     <>
@@ -147,17 +211,25 @@ export default function Sidebar({ currentView, onViewChange, mobileOpen = false,
         aria-hidden="true"
       />
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-border bg-surface flex flex-col transition-transform duration-200 md:relative md:z-auto md:translate-x-0 md:flex-shrink-0 ${
+        style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-border bg-surface flex flex-col transition-[transform,width] duration-200 md:relative md:z-auto md:w-[var(--sidebar-width)] md:translate-x-0 md:flex-shrink-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
-        } ${collapsed ? 'md:w-16' : 'md:w-64'}`}
+        }`}
       >
-      {/* Toggle button */}
+      <div
+        onPointerDown={startResize}
+        className="absolute -right-1 top-0 hidden h-full w-2 cursor-col-resize items-center justify-center md:flex"
+        title="Drag to resize navigation"
+      >
+        <div className="h-full w-px bg-transparent hover:bg-primary/40" />
+      </div>
+
       <button
-        onClick={() => setCollapsed(!collapsed)}
-        className="absolute -right-3 top-6 hidden w-6 h-6 bg-surface border border-border rounded-full md:flex items-center justify-center z-10 hover:bg-surface-variant"
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        onClick={toggleCompactWidth}
+        className="absolute -right-3 top-6 hidden h-6 w-6 items-center justify-center rounded-full border border-border bg-surface shadow-sm hover:bg-surface-variant md:flex"
+        title={drawerCollapsed ? 'Expand navigation' : 'Compact navigation'}
       >
-        <ChevronRight className={`w-3 h-3 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
+        <ChevronRight className={`h-3 w-3 transition-transform ${drawerCollapsed ? '' : 'rotate-180'}`} />
       </button>
 
       <button

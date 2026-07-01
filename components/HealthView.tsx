@@ -16,6 +16,26 @@ interface RehabDay {
   title: string;
   plan: string;
   completed: boolean;
+  completionStatus?: 'partial' | 'completed';
+  actual?: {
+    summary?: string;
+    completed?: ActualExercise[];
+    remaining?: string[];
+    rawPath?: string;
+    painResponse?: {
+      during: string | null;
+      night: string | null;
+      nextDay: string | null;
+    };
+  };
+}
+
+interface ActualExercise {
+  code: string;
+  name: string;
+  load: string | null;
+  sets: number | null;
+  reps: number | null;
 }
 
 interface RehabPlan {
@@ -139,6 +159,43 @@ export default function HealthView() {
             </div>
             <h2 className="text-2xl font-semibold text-on-surface">{selectedDay.title}</h2>
             <p className="mt-2 text-base text-on-surface">{selectedDay.plan}</p>
+
+            {selectedDay.actual?.completed?.length ? (
+              <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-emerald-700">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span className="text-sm font-semibold">
+                      {selectedDay.completed ? 'Done today' : 'Logged so far'}
+                    </span>
+                  </div>
+                  {selectedDay.completionStatus && (
+                    <span className="rounded border border-emerald-300 bg-white px-2 py-0.5 text-xs text-emerald-700">
+                      {selectedDay.completionStatus}
+                    </span>
+                  )}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  {selectedDay.actual.completed.map((item) => (
+                    <div key={item.code} className="rounded border border-emerald-200 bg-white px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">{item.code}</span>
+                        <span className="truncate text-sm font-semibold text-on-surface">{item.name}</span>
+                      </div>
+                      <p className="mt-1 text-sm text-on-surface-variant">{formatActualExercise(item)}</p>
+                    </div>
+                  ))}
+                </div>
+                {selectedDay.actual.remaining?.length ? (
+                  <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-xs font-semibold uppercase text-amber-700">Still open</p>
+                    <p className="mt-1 text-sm text-on-surface">{selectedDay.actual.remaining.join('; ')}</p>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm font-medium text-emerald-700">All planned items are closed.</p>
+                )}
+              </div>
+            ) : null}
 
             {selectedDayCodes.length > 0 && (
               <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -289,6 +346,11 @@ export default function HealthView() {
                     <div>
                       <p className="font-medium text-on-surface">{day.title}</p>
                       <p className="mt-1 text-on-surface-variant">{day.plan}</p>
+                      {day.actual?.summary && (
+                        <p className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
+                          Done: {day.actual.summary}
+                        </p>
+                      )}
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {extractExerciseCodes(day.plan, exerciseLibrary).map((code) => (
                           <button
@@ -304,7 +366,16 @@ export default function HealthView() {
                         ))}
                       </div>
                     </div>
-                    <span className="mt-1 rounded-full border border-border p-1.5 text-on-surface-variant" title={isPast ? 'Completed day' : 'Mark complete'}>
+                    <span
+                      className={`mt-1 rounded-full border p-1.5 ${
+                        day.completed
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                          : day.completionStatus === 'partial'
+                            ? 'border-amber-300 bg-amber-50 text-amber-700'
+                            : 'border-border text-on-surface-variant'
+                      }`}
+                      title={day.completed ? 'Completed day' : day.completionStatus === 'partial' ? 'Partially logged' : 'Not completed'}
+                    >
                       <CheckCircle2 className="h-4 w-4" />
                     </span>
                   </div>
@@ -369,4 +440,12 @@ function extractExerciseCodes(planText: string, exercises: Exercise[]) {
     const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`(^|[^A-Z])${escaped}([^A-Z]|$)`).test(planText);
   });
+}
+
+function formatActualExercise(item: ActualExercise) {
+  const parts = [];
+  if (item.load) parts.push(item.load);
+  if (item.sets) parts.push(`${item.sets} sets`);
+  if (item.reps) parts.push(`${item.reps} reps`);
+  return parts.length ? parts.join(' / ') : 'done';
 }

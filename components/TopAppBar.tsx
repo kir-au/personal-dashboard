@@ -5,6 +5,7 @@ import {
   Settings, 
   Bell, 
   User,
+  Check,
   Grid,
   Filter,
   RefreshCw,
@@ -25,6 +26,11 @@ interface TopAppBarProps {
 
 export default function TopAppBar({ currentView, searchQuery, onSearchQueryChange, onMenuClick }: TopAppBarProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [authStatus, setAuthStatus] = useState<{
+    enabled: boolean;
+    user: { name?: string | null; email?: string | null; image?: string | null } | null;
+  } | null>(null);
   const isVaultView = currentView === 'browse';
 
   useEffect(() => {
@@ -34,11 +40,30 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
     document.documentElement.dataset.theme = initialTheme;
   }, []);
 
-  const toggleTheme = () => {
-    const nextTheme = theme === 'light' ? 'dark' : 'light';
+  useEffect(() => {
+    fetch('/api/auth/status')
+      .then((res) => res.json())
+      .then((data) => setAuthStatus(data))
+      .catch(() => setAuthStatus({ enabled: false, user: null }));
+  }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+
+    const closeSettings = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-settings-menu]')) setSettingsOpen(false);
+    };
+
+    window.addEventListener('click', closeSettings);
+    return () => window.removeEventListener('click', closeSettings);
+  }, [settingsOpen]);
+
+  const setDashboardTheme = (nextTheme: 'light' | 'dark') => {
     setTheme(nextTheme);
     document.documentElement.dataset.theme = nextTheme;
     window.localStorage.setItem('personal-dashboard-theme', nextTheme);
+    setSettingsOpen(false);
   };
 
   return (
@@ -115,18 +140,6 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
             </>
           )}
 
-          <button
-            onClick={toggleTheme}
-            className="p-2 rounded-lg hover:bg-surface-variant hidden md:flex items-center justify-center"
-            title={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-          >
-            {theme === 'light' ? (
-              <Moon className="w-4 h-4 text-on-surface-variant" />
-            ) : (
-              <Sun className="w-4 h-4 text-on-surface-variant" />
-            )}
-          </button>
-
           {/* Mobile search button */}
           {isVaultView && <button 
             className="p-2 rounded-lg hover:bg-surface-variant md:hidden"
@@ -153,25 +166,104 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
           </button>
 
           {/* Settings */}
-          <button 
-            className="p-2 rounded-lg hover:bg-surface-variant"
-            title="Settings"
-          >
-            <Settings className="w-4 h-4 text-on-surface-variant" />
-          </button>
+          <div className="relative" data-settings-menu>
+            <button
+              onClick={(event) => {
+                event.stopPropagation();
+                setSettingsOpen((open) => !open);
+              }}
+              className="flex items-center justify-center rounded-lg p-2 hover:bg-surface-variant"
+              title="Settings"
+              aria-haspopup="menu"
+              aria-expanded={settingsOpen}
+            >
+              <Settings className="h-4 w-4 text-on-surface-variant" />
+            </button>
+            {settingsOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-11 z-50 w-80 rounded-lg border border-border bg-surface p-2 shadow-lg"
+              >
+                <div className="px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">Appearance</p>
+                  <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                    Choose the color mode for dashboard, calendar, and vault reading surfaces.
+                  </p>
+                </div>
+                <button
+                  role="menuitemradio"
+                  aria-checked={theme === 'light'}
+                  onClick={() => setDashboardTheme('light')}
+                  className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left hover:bg-hover"
+                >
+                  <Sun className="mt-0.5 h-4 w-4 text-on-surface-variant" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-on-surface">Light mode</span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-on-surface-variant">
+                      Bright surfaces for planning, calendar review, and daytime use.
+                    </span>
+                  </span>
+                  {theme === 'light' && <Check className="mt-0.5 h-4 w-4 text-primary" />}
+                </button>
+                <button
+                  role="menuitemradio"
+                  aria-checked={theme === 'dark'}
+                  onClick={() => setDashboardTheme('dark')}
+                  className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left hover:bg-hover"
+                >
+                  <Moon className="mt-0.5 h-4 w-4 text-on-surface-variant" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-on-surface">Dark mode</span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-on-surface-variant">
+                      Lower-luminance surfaces for evening use and reduced screen brightness.
+                    </span>
+                  </span>
+                  {theme === 'dark' && <Check className="mt-0.5 h-4 w-4 text-primary" />}
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* User menu */}
           <div className="relative">
-            <button 
-              className="flex items-center space-x-2 p-1.5 rounded-lg hover:bg-surface-variant"
-              title="Account"
-            >
-              <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                <User className="w-4 h-4 text-primary" />
-              </div>
-              <span className="text-sm font-medium text-on-surface hidden lg:inline">Kirill</span>
-              <MoreVertical className="w-4 h-4 text-on-surface-variant hidden lg:inline" />
-            </button>
+            {authStatus?.enabled && !authStatus.user ? (
+              <a
+                href="/login"
+                className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-on-surface-variant hover:bg-surface-variant"
+              >
+                Sign in
+              </a>
+            ) : authStatus?.enabled ? (
+              <a
+                href="/api/auth/signout"
+                className="flex items-center space-x-2 rounded-lg p-1.5 hover:bg-surface-variant"
+                title="Account"
+              >
+                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-primary/10">
+                  {authStatus?.user?.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={authStatus.user.image} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <User className="h-4 w-4 text-primary" />
+                  )}
+                </div>
+                <span className="hidden text-sm font-medium text-on-surface lg:inline">
+                  {authStatus?.user?.name || 'Account'}
+                </span>
+                <MoreVertical className="hidden h-4 w-4 text-on-surface-variant lg:inline" />
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="flex cursor-default items-center space-x-2 rounded-lg p-1.5"
+                title="Local development mode. Google authentication is not configured."
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
+                  <User className="h-4 w-4 text-primary" />
+                </div>
+                <span className="hidden text-sm font-medium text-on-surface lg:inline">Local</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
