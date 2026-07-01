@@ -53,6 +53,10 @@ function isTextPreviewable(fileName: string) {
   ].includes(ext || '');
 }
 
+function discussionBaseName(fileName: string) {
+  return fileName.replace(/\.(md|markdown)$/i, '');
+}
+
 export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
   const [currentPath, setCurrentPath] = useState(() => {
     if (typeof window === 'undefined') return initialPath;
@@ -319,6 +323,11 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
   const breadcrumbs = currentPath
     ? ['personal-vault', ...currentPath.split('/').filter(p => p)]
     : ['personal-vault'];
+  const assetDirectories = directories.filter((dir) => dir.name.endsWith('.assets'));
+  const regularDirectories = directories.filter((dir) => !dir.name.endsWith('.assets'));
+  const assetDirectoryByBase = new Map(
+    assetDirectories.map((dir) => [dir.name.replace(/\.assets$/, ''), dir])
+  );
 
   const filteredFiles = files.filter((file) => {
     if (reviewFilter === 'important') return Boolean(file.review?.important);
@@ -389,8 +398,8 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {/* Directories first */}
-            {directories.map((dir) => (
+            {/* Directories first, except discussion asset bundles. */}
+            {regularDirectories.map((dir) => (
               <div
                 key={dir.relativePath}
                 className="px-4 py-3 hover:bg-hover cursor-pointer transition-colors flex items-center"
@@ -412,77 +421,94 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
               const important = Boolean(file.review?.important);
               const reviewLater = Boolean(file.review?.reviewLater);
               const relevant = file.review?.relevant !== false;
+              const assetDir = assetDirectoryByBase.get(discussionBaseName(file.name));
 
               return (
-              <div
-                key={file.relativePath}
-                className="px-4 py-3 hover:bg-hover cursor-pointer transition-colors flex items-center"
-                onClick={() => handleFileClick(file)}
-              >
-                <div className="mr-3">
-                  {getFileIcon(file.name)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-on-surface truncate">{file.name}</div>
-                  <div className="text-xs text-on-surface-variant mt-0.5 flex items-center space-x-3">
-                    <span>{formatDate(file.mtime)}</span>
-                    <span>•</span>
-                    <span>{formatSize(file.size)}</span>
-                    {important && (
-                      <>
+                <div key={file.relativePath}>
+                  <div
+                    className="px-4 py-3 hover:bg-hover cursor-pointer transition-colors flex items-center"
+                    onClick={() => handleFileClick(file)}
+                  >
+                    <div className="mr-3">
+                      {getFileIcon(file.name)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-on-surface truncate">{file.name}</div>
+                      <div className="text-xs text-on-surface-variant mt-0.5 flex items-center space-x-3">
+                        <span>{formatDate(file.mtime)}</span>
                         <span>•</span>
-                        <span className="text-primary">Important</span>
-                      </>
-                    )}
-                    {reviewLater && (
-                      <>
-                        <span>•</span>
-                        <span className="text-primary">Review later</span>
-                      </>
-                    )}
-                    {!relevant && (
-                      <>
-                        <span>•</span>
-                        <span className="text-error">Not relevant</span>
-                      </>
-                    )}
+                        <span>{formatSize(file.size)}</span>
+                        {important && (
+                          <>
+                            <span>•</span>
+                            <span className="text-primary">Important</span>
+                          </>
+                        )}
+                        {reviewLater && (
+                          <>
+                            <span>•</span>
+                            <span className="text-primary">Review later</span>
+                          </>
+                        )}
+                        {!relevant && (
+                          <>
+                            <span>•</span>
+                            <span className="text-error">Not relevant</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="ml-3 flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                      <button
+                        onClick={() => updateReview(file, { important: !important })}
+                        className={`rounded p-2 transition-colors ${important ? 'bg-active text-primary' : 'text-on-surface-variant hover:bg-hover'}`}
+                        title={important ? 'Unmark important' : 'Mark important'}
+                      >
+                        <Star className={`h-4 w-4 ${important ? 'fill-current' : ''}`} />
+                      </button>
+                      <button
+                        onClick={() => updateReview(file, { reviewLater: !reviewLater })}
+                        className={`rounded p-2 transition-colors ${reviewLater ? 'bg-active text-primary' : 'text-on-surface-variant hover:bg-hover'}`}
+                        title={reviewLater ? 'Remove review-later bookmark' : 'Review later'}
+                      >
+                        <Bookmark className={`h-4 w-4 ${reviewLater ? 'fill-current' : ''}`} />
+                      </button>
+                      <button
+                        onClick={() => updateReview(file, { relevant: !relevant })}
+                        className={`rounded p-2 transition-colors ${relevant ? 'text-on-surface-variant hover:bg-hover' : 'bg-orange-50 text-error'}`}
+                        title={relevant ? 'Mark not relevant' : 'Mark relevant'}
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => moveToTrash(file)}
+                        className="rounded p-2 text-on-surface-variant transition-colors hover:bg-orange-50 hover:text-error"
+                        title="Move to vault trash"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
+                  {assetDir && (
+                    <div
+                      className="border-t border-border/60 bg-surface-variant/25 px-4 py-2 pl-11 hover:bg-hover cursor-pointer transition-colors flex items-center"
+                      onClick={() => handleDirectoryClick(assetDir)}
+                    >
+                      <Folder className="w-4 h-4 text-green-500 mr-3" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-on-surface truncate">{assetDir.name}</div>
+                        <div className="text-xs text-on-surface-variant mt-0.5">
+                          Assets for this discussion
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-on-surface-variant" />
+                    </div>
+                  )}
                 </div>
-                <div className="ml-3 flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
-                  <button
-                    onClick={() => updateReview(file, { important: !important })}
-                    className={`rounded p-2 transition-colors ${important ? 'bg-active text-primary' : 'text-on-surface-variant hover:bg-hover'}`}
-                    title={important ? 'Unmark important' : 'Mark important'}
-                  >
-                    <Star className={`h-4 w-4 ${important ? 'fill-current' : ''}`} />
-                  </button>
-                  <button
-                    onClick={() => updateReview(file, { reviewLater: !reviewLater })}
-                    className={`rounded p-2 transition-colors ${reviewLater ? 'bg-active text-primary' : 'text-on-surface-variant hover:bg-hover'}`}
-                    title={reviewLater ? 'Remove review-later bookmark' : 'Review later'}
-                  >
-                    <Bookmark className={`h-4 w-4 ${reviewLater ? 'fill-current' : ''}`} />
-                  </button>
-                  <button
-                    onClick={() => updateReview(file, { relevant: !relevant })}
-                    className={`rounded p-2 transition-colors ${relevant ? 'text-on-surface-variant hover:bg-hover' : 'bg-orange-50 text-error'}`}
-                    title={relevant ? 'Mark not relevant' : 'Mark relevant'}
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => moveToTrash(file)}
-                    className="rounded p-2 text-on-surface-variant transition-colors hover:bg-orange-50 hover:text-error"
-                    title="Move to vault trash"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
               );
             })}
 
-            {directories.length === 0 && filteredFiles.length === 0 && (
+            {regularDirectories.length === 0 && filteredFiles.length === 0 && (
               <div className="p-8 text-center">
                 <Folder className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                 <p className="text-on-surface-variant">

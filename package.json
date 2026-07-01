@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "import:chatgpt": "node scripts/import-chatgpt-export.mjs"
   },
   "dependencies": {
     "canvas": "^3.2.3",
