@@ -24,6 +24,15 @@ function isLocalMarkdownHref(href: string) {
     && href.split('#')[0].split('?')[0].toLowerCase().endsWith('.md');
 }
 
+function isLocalVaultHref(href: string) {
+  return Boolean(href)
+    && !href.startsWith('#')
+    && !href.startsWith('/')
+    && !href.includes('://')
+    && !href.startsWith('mailto:')
+    && !href.startsWith('tel:');
+}
+
 function normalizeVaultPath(path: string) {
   const parts: string[] = [];
   for (const part of path.split('/')) {
@@ -50,12 +59,26 @@ function vaultReaderHref(sourcePath: string | undefined, href: string) {
   return `/?${params.toString()}${hash ? `#${hash}` : ''}`;
 }
 
+function vaultAssetHref(sourcePath: string | undefined, href: string) {
+  const [pathAndQuery, hash = ''] = href.split('#');
+  const sourceDir = sourcePath?.includes('/')
+    ? sourcePath.split('/').slice(0, -1).join('/')
+    : '';
+  const targetFile = normalizeVaultPath(sourceDir ? `${sourceDir}/${pathAndQuery}` : pathAndQuery);
+  return `/api/vault-asset/${encodeURIComponent(targetFile)}${hash ? `#${hash}` : ''}`;
+}
+
 function rewriteLocalMarkdownLinks(sourcePath?: string) {
   return function transformer(tree: any) {
     const visit = (node: any) => {
       if (!node || typeof node !== 'object') return;
       if (node.tagName === 'a' && node.properties?.href && isLocalMarkdownHref(String(node.properties.href))) {
         node.properties.href = vaultReaderHref(sourcePath, String(node.properties.href));
+      } else if (node.tagName === 'a' && node.properties?.href && isLocalVaultHref(String(node.properties.href))) {
+        node.properties.href = vaultAssetHref(sourcePath, String(node.properties.href));
+      }
+      if (node.tagName === 'img' && node.properties?.src && isLocalVaultHref(String(node.properties.src))) {
+        node.properties.src = vaultAssetHref(sourcePath, String(node.properties.src));
       }
       if (Array.isArray(node.children)) {
         node.children.forEach(visit);
