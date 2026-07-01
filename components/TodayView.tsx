@@ -99,7 +99,7 @@ interface TimelineBlock {
   time: string;
   title: string;
   body: string;
-type: 'checkin' | 'focus' | 'health' | 'family' | 'admin';
+  type: 'checkin' | 'focus' | 'health' | 'family' | 'admin';
 }
 
 interface ProjectContext {
@@ -109,6 +109,17 @@ interface ProjectContext {
   summary: string;
   next: string;
   signal: string;
+}
+
+function formatDashboardDate(dateValue?: string | null) {
+  const date = dateValue ? new Date(`${dateValue}T00:00:00`) : new Date();
+
+  return new Intl.DateTimeFormat('en-AU', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
 }
 
 const baselineTimeline: TimelineBlock[] = [
@@ -276,6 +287,10 @@ export default function TodayView() {
   const publishingDay = publishingPlan?.today ?? publishingPlan?.upcoming ?? null;
   const publishingIsToday = Boolean(publishingPlan?.today);
   const publishingLink = '/?view=project&project=ai';
+  const dashboardDate = useMemo(
+    () => formatDashboardDate(healthPlan?.todayDate ?? publishingPlan?.todayDate),
+    [healthPlan?.todayDate, publishingPlan?.todayDate]
+  );
   const dayTimeline = useMemo(() => {
     let blocks = baselineTimeline;
     if (publishingDay) {
@@ -340,37 +355,40 @@ export default function TodayView() {
   }
 
   return (
-    <div className="flex w-full max-w-[1440px] flex-col gap-4 pb-8">
-      <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
-        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
+    <div className="flex w-auto max-w-full min-w-0 flex-col gap-4 overflow-hidden pb-8 xl:w-full xl:max-w-[1440px]">
+      <div className="grid w-full max-w-full min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <section className="w-full max-w-full min-w-0 rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <div className="mb-2 flex items-center gap-2 text-primary">
                 <CalendarDays className="h-5 w-5" />
                 <span className="text-xs font-semibold uppercase tracking-wide">Today</span>
+                <span className="rounded border border-primary/20 bg-active px-2 py-0.5 text-xs font-medium text-primary">
+                  {dashboardDate}
+                </span>
               </div>
               <h2 className="text-xl font-semibold text-on-surface">Day map</h2>
               <p className="text-sm text-on-surface-variant">Use the plan unless your state changed.</p>
             </div>
-            <span className="rounded-lg border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
+            <span className="w-fit rounded-lg border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
               flexible draft
             </span>
           </div>
 
           <div className="space-y-3">
             {dayTimeline.map((block) => (
-              <div key={`${block.time}-${block.title}`} className="grid grid-cols-[88px_1fr] gap-3">
-                <div className="pt-3 text-xs font-medium text-on-surface-variant">{block.time}</div>
-                <div className={`rounded-lg border p-3 ${typeColor[block.type]}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
+              <div key={`${block.time}-${block.title}`} className="grid min-w-0 grid-cols-1 gap-1.5 sm:grid-cols-[88px_minmax(0,1fr)] sm:gap-3">
+                <div className="text-xs font-medium text-on-surface-variant sm:pt-3">{block.time}</div>
+                <div className={`min-w-0 rounded-lg border p-3 ${typeColor[block.type]}`}>
+                  <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
                       <h4 className="text-sm font-semibold text-on-surface">{block.title}</h4>
                       <p className="mt-1 text-sm text-on-surface-variant">{block.body}</p>
                     </div>
                     {block.type === 'focus' && publishingDay ? (
                       <a
                         href={publishingLink}
-                        className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
                       >
                         Open
                         <ArrowRight className="h-3 w-3" />
@@ -378,7 +396,7 @@ export default function TodayView() {
                     ) : block.type === 'health' && healthDay ? (
                       <a
                         href={healthLink}
-                        className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
                       >
                         Open
                         <ArrowRight className="h-3 w-3" />
@@ -393,7 +411,7 @@ export default function TodayView() {
           </div>
         </section>
 
-        <aside className="flex flex-col gap-4">
+        <aside className="min-w-0 flex flex-col gap-4">
           <section className="rounded-lg border border-border bg-surface p-3 shadow-sm">
             <details>
               <summary className="cursor-pointer list-none">

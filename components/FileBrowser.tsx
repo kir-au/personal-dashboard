@@ -30,6 +30,29 @@ interface FileBrowserProps {
 
 type ReviewFilter = 'all' | 'important' | 'reviewLater' | 'notRelevant';
 
+function isTextPreviewable(fileName: string) {
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  return [
+    'md',
+    'markdown',
+    'txt',
+    'json',
+    'csv',
+    'tsv',
+    'yaml',
+    'yml',
+    'js',
+    'ts',
+    'jsx',
+    'tsx',
+    'css',
+    'html',
+    'xml',
+    'py',
+    'sh',
+  ].includes(ext || '');
+}
+
 export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
   const [currentPath, setCurrentPath] = useState(() => {
     if (typeof window === 'undefined') return initialPath;
@@ -71,6 +94,24 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
     }
   };
 
+  const openMarkdownFile = async (relativePath: string) => {
+    const name = relativePath.split('/').pop() || relativePath;
+    setSelectedFile({
+      name,
+      path: relativePath,
+      relativePath,
+      size: 0,
+      mtime: Date.now(),
+      review: null,
+    });
+    if (isTextPreviewable(name)) {
+      fetchFileContent(relativePath);
+    } else {
+      setFileContent(null);
+      setContentLoading(false);
+    }
+  };
+
   const fetchFileContent = async (filePath: string) => {
     setContentLoading(true);
     try {
@@ -92,7 +133,16 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
   };
 
   useEffect(() => {
-    fetchDirectory(currentPath);
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const filePath = params?.get('file');
+    const directoryPath = filePath?.includes('/')
+      ? filePath.split('/').slice(0, -1).join('/')
+      : currentPath;
+
+    fetchDirectory(directoryPath || currentPath);
+    if (filePath) {
+      openMarkdownFile(filePath);
+    }
   }, []);
 
   const updateVaultPathInUrl = (path: string) => {
@@ -118,7 +168,12 @@ export default function FileBrowser({ initialPath = '' }: FileBrowserProps) {
 
   const handleFileClick = (file: FileItem) => {
     setSelectedFile(file);
-    fetchFileContent(file.relativePath);
+    if (isTextPreviewable(file.name)) {
+      fetchFileContent(file.relativePath);
+    } else {
+      setFileContent(null);
+      setContentLoading(false);
+    }
   };
 
   const updateReview = async (file: FileItem, patch: Record<string, boolean>) => {

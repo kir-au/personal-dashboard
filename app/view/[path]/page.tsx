@@ -116,6 +116,7 @@ export default function MarkdownViewerPage() {
             <MarkdownRenderer 
               content={file.content} 
               className="min-h-[calc(100vh-120px)]"
+              sourcePath={path}
             />
           </div>
 

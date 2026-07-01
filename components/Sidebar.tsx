@@ -17,7 +17,8 @@ import {
   Repeat,
   Sparkles,
   TrendingUp,
-  Users
+  Users,
+  X
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -33,11 +34,14 @@ interface SidebarItem {
 interface SidebarProps {
   currentView: 'today' | 'browse' | 'planner' | 'health' | 'recent' | 'project';
   onViewChange: (view: 'today' | 'browse' | 'planner' | 'health' | 'recent' | 'project') => void;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
+export default function Sidebar({ currentView, onViewChange, mobileOpen = false, onMobileClose }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [recentCount, setRecentCount] = useState<number | undefined>(undefined);
+  const drawerCollapsed = collapsed && !mobileOpen;
 
   useEffect(() => {
     fetch('/api/recent?limit=1')
@@ -56,21 +60,30 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
       label: 'Today',
       icon: <LayoutDashboard className="w-5 h-5" />,
       active: currentView === 'today',
-      onClick: () => onViewChange('today'),
+      onClick: () => {
+        onViewChange('today');
+        onMobileClose?.();
+      },
     },
     {
       id: 'vault',
       label: 'Vault',
       icon: <HardDrive className="w-5 h-5" />,
       active: currentView === 'browse',
-      onClick: () => onViewChange('browse'),
+      onClick: () => {
+        onViewChange('browse');
+        onMobileClose?.();
+      },
     },
     {
       id: 'planner',
       label: 'Planner',
       icon: <CalendarDays className="w-5 h-5" />,
       active: currentView === 'planner',
-      onClick: () => onViewChange('planner'),
+      onClick: () => {
+        onViewChange('planner');
+        onMobileClose?.();
+      },
     },
     {
       id: 'recent',
@@ -78,7 +91,10 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
       icon: <Clock className="w-5 h-5" />,
       count: recentCount,
       active: currentView === 'recent',
-      onClick: () => onViewChange('recent'),
+      onClick: () => {
+        onViewChange('recent');
+        onMobileClose?.();
+      },
     },
   ];
 
@@ -88,7 +104,10 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
       label: 'Health',
       icon: <Dumbbell className="w-4 h-4" />,
       active: currentView === 'health',
-      onClick: () => onViewChange('health'),
+      onClick: () => {
+        onViewChange('health');
+        onMobileClose?.();
+      },
     },
     ...[
       { id: 'business', label: 'Business', icon: <BriefcaseBusiness className="w-4 h-4" /> },
@@ -113,43 +132,64 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
           window.history.replaceState(null, '', url.toString());
         }
         onViewChange('project');
+        onMobileClose?.();
       },
     })),
   ];
 
   return (
-    <aside className={`${collapsed ? 'w-16' : 'w-64'} border-r border-border bg-surface flex flex-col transition-all duration-200 flex-shrink-0`}>
+    <>
+      <div
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${
+          mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        onClick={onMobileClose}
+        aria-hidden="true"
+      />
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-border bg-surface flex flex-col transition-transform duration-200 md:relative md:z-auto md:translate-x-0 md:flex-shrink-0 ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        } ${collapsed ? 'md:w-16' : 'md:w-64'}`}
+      >
       {/* Toggle button */}
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="absolute -right-3 top-6 w-6 h-6 bg-surface border border-border rounded-full flex items-center justify-center z-10 hover:bg-surface-variant"
+        className="absolute -right-3 top-6 hidden w-6 h-6 bg-surface border border-border rounded-full md:flex items-center justify-center z-10 hover:bg-surface-variant"
         title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       >
         <ChevronRight className={`w-3 h-3 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
       </button>
 
+      <button
+        onClick={onMobileClose}
+        className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-lg hover:bg-surface-variant md:hidden"
+        title="Close navigation"
+      >
+        <X className="h-5 w-5 text-on-surface-variant" />
+      </button>
+
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-4">
+      <nav className="flex-1 overflow-y-auto py-12 md:py-4">
         <div className="px-3">
-          <h3 className={`text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2 ${collapsed ? 'text-center' : 'px-3'}`}>
-            {collapsed ? '·' : 'Navigation'}
+          <h3 className={`text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2 ${drawerCollapsed ? 'text-center' : 'px-3'}`}>
+            {drawerCollapsed ? '·' : 'Navigation'}
           </h3>
           <ul className="space-y-1">
             {mainItems.map((item) => (
               <li key={item.id}>
                 <button
                   onClick={item.onClick}
-                  className={`w-full flex items-center ${collapsed ? 'justify-center px-3' : 'px-3'} py-2 rounded-lg text-sm transition-colors ${
+                  className={`w-full flex items-center ${drawerCollapsed ? 'justify-center px-3' : 'px-3'} py-2 rounded-lg text-sm transition-colors ${
                     item.active
                       ? 'bg-active text-primary font-medium'
                       : 'hover:bg-surface-variant text-on-surface'
                   }`}
-                  title={collapsed ? item.label : undefined}
+                  title={drawerCollapsed ? item.label : undefined}
                 >
                   <span className={`${item.active ? 'text-primary' : 'text-on-surface-variant'}`}>
                     {item.icon}
                   </span>
-                  {!collapsed && (
+                  {!drawerCollapsed && (
                     <>
                       <span className="ml-3 flex-1 text-left">{item.label}</span>
                       {item.count !== undefined && (
@@ -166,27 +206,28 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
         </div>
 
         <div className="mt-5 px-3">
-          <h3 className={`text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2 ${collapsed ? 'text-center' : 'px-3'}`}>
-            {collapsed ? '·' : 'Projects'}
+          <h3 className={`text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2 ${drawerCollapsed ? 'text-center' : 'px-3'}`}>
+            {drawerCollapsed ? '·' : 'Projects'}
           </h3>
           <ul className="space-y-1">
             {contextItems.map((item) => (
               <li key={item.id}>
                 <button
                   onClick={item.onClick}
-                  className={`w-full flex items-center ${collapsed ? 'justify-center px-3' : 'px-3'} py-2 rounded-lg text-sm transition-colors ${
+                  className={`w-full flex items-center ${drawerCollapsed ? 'justify-center px-3' : 'px-3'} py-2 rounded-lg text-sm transition-colors ${
                     item.active ? 'bg-active text-primary font-medium' : 'hover:bg-surface-variant text-on-surface'
                   }`}
-                  title={collapsed ? item.label : undefined}
+                  title={drawerCollapsed ? item.label : undefined}
                 >
                   <span className={item.active ? 'text-primary' : 'text-on-surface-variant'}>{item.icon}</span>
-                  {!collapsed && <span className="ml-3 flex-1 text-left">{item.label}</span>}
+                  {!drawerCollapsed && <span className="ml-3 flex-1 text-left">{item.label}</span>}
                 </button>
               </li>
             ))}
           </ul>
         </div>
       </nav>
-    </aside>
+      </aside>
+    </>
   );
 }

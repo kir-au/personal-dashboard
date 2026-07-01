@@ -25,6 +25,7 @@ export default function Home() {
   const [currentView, setCurrentView] = useState<DashboardView>('today');
   const [searchQuery, setSearchQuery] = useState('');
   const [projectId, setProjectId] = useState('business');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const isSearching = currentView === 'browse' && searchQuery.trim().length > 0;
 
   useEffect(() => {
@@ -56,15 +57,21 @@ export default function Home() {
   return (
     <>
       <div className="flex h-screen bg-background">
-        <Sidebar currentView={currentView} onViewChange={handleViewChange} />
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <Sidebar
+          currentView={currentView}
+          onViewChange={handleViewChange}
+          mobileOpen={mobileSidebarOpen}
+          onMobileClose={() => setMobileSidebarOpen(false)}
+        />
+        <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
           <TopAppBar
             currentView={currentView}
             onViewChange={handleViewChange}
             searchQuery={searchQuery}
             onSearchQueryChange={setSearchQuery}
+            onMenuClick={() => setMobileSidebarOpen(true)}
           />
-          <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
             {isSearching ? (
               <SearchView query={searchQuery} />
             ) : currentView === 'today' ? (

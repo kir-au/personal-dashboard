@@ -10,7 +10,8 @@ import {
   RefreshCw,
   MoreVertical,
   Moon,
-  Sun
+  Sun,
+  Menu
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -19,9 +20,10 @@ interface TopAppBarProps {
   onViewChange?: (view: any) => void;
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
+  onMenuClick?: () => void;
 }
 
-export default function TopAppBar({ currentView, searchQuery, onSearchQueryChange }: TopAppBarProps) {
+export default function TopAppBar({ currentView, searchQuery, onSearchQueryChange, onMenuClick }: TopAppBarProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const isVaultView = currentView === 'browse';
 
@@ -44,6 +46,14 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
       <div className="flex items-center justify-between px-4 py-3">
         {/* Left section */}
         <div className="flex items-center space-x-4">
+          <button
+            onClick={onMenuClick}
+            className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-surface-variant md:hidden"
+            title="Open navigation"
+          >
+            <Menu className="h-5 w-5 text-on-surface-variant" />
+          </button>
+
           {/* App logo/name */}
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
