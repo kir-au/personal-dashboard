@@ -140,15 +140,6 @@ interface PublishingPlan {
   days?: PublishingDay[];
 }
 
-interface ProjectContext {
-  id: string;
-  title: string;
-  icon: React.ReactNode;
-  summary: string;
-  next: string;
-  signal: string;
-}
-
 interface AssistantReviewCard {
   projectId: string;
   projectTitle: string;
@@ -223,57 +214,6 @@ function formatRelativeDay(dateValue: string, todayValue: string) {
   return `In ${diff} days`;
 }
 
-const projectContexts: ProjectContext[] = [
-  {
-    id: 'health',
-    title: 'Health',
-    icon: <HeartPulse className="h-4 w-4" />,
-    summary: 'Energy, food, training, recovery, alcohol guardrails.',
-    next: 'Keep the day plan physically realistic.',
-    signal: 'Baseline',
-  },
-  {
-    id: 'business',
-    title: 'Business',
-    icon: <BriefcaseBusiness className="h-4 w-4" />,
-    summary: 'Product execution and personal operating system work.',
-    next: 'Ship one visible dashboard improvement.',
-    signal: 'Active',
-  },
-  {
-    id: 'ai',
-    title: 'AI',
-    icon: <Sparkles className="h-4 w-4" />,
-    summary: 'Vault extraction, summarization, API/MCP boundaries.',
-    next: 'Turn chat context into planner projection.',
-    signal: 'Design',
-  },
-  {
-    id: 'family',
-    title: 'Family',
-    icon: <Users className="h-4 w-4" />,
-    summary: 'Life context that should not disappear behind work tasks.',
-    next: 'Keep visible in Today before task overload.',
-    signal: 'Visible',
-  },
-  {
-    id: 'wealth',
-    title: 'Wealth',
-    icon: <TrendingUp className="h-4 w-4" />,
-    summary: 'Investing, trading, risk, long-term financial context.',
-    next: 'Summaries only until source notes are clearer.',
-    signal: 'Waiting',
-  },
-  {
-    id: 'routine',
-    title: 'Routine',
-    icon: <Activity className="h-4 w-4" />,
-    summary: 'Repeated actions that keep the day stable.',
-    next: 'Anchor check-in, focus block, health block.',
-    signal: 'Daily',
-  },
-];
-
 const areaIcon: Record<PlannerTask['area'], React.ReactNode> = {
   Product: <Target className="h-4 w-4 text-emerald-400" />,
   Health: <Dumbbell className="h-4 w-4 text-amber-400" />,
@@ -330,7 +270,6 @@ export default function TodayView() {
   const [publishingPlan, setPublishingPlan] = useState<PublishingPlan | null>(null);
   const [assistantReview, setAssistantReview] = useState<AssistantReview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [projectCreateStatus, setProjectCreateStatus] = useState<'idle' | 'saving' | 'error'>('idle');
   const [selectedDate, setSelectedDate] = useState<string>(() => getInitialSelectedDate());
 
   useEffect(() => {
@@ -448,31 +387,6 @@ export default function TodayView() {
     url.searchParams.set('date', dateValue);
     window.history.pushState(null, '', url.toString());
   };
-  const createProject = async () => {
-    const title = window.prompt('New project name');
-    if (!title?.trim()) return;
-
-    setProjectCreateStatus('saving');
-    try {
-      const response = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim() }),
-      });
-      const data = await response.json();
-      if (!response.ok || data.error) throw new Error(data.error || 'Failed to create project');
-      window.dispatchEvent(new Event('projects-changed'));
-      const url = new URL(window.location.href);
-      url.searchParams.set('view', 'project');
-      url.searchParams.set('project', data.project.id);
-      window.history.replaceState(null, '', url.toString());
-      window.dispatchEvent(new PopStateEvent('popstate'));
-      setProjectCreateStatus('idle');
-    } catch {
-      setProjectCreateStatus('error');
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-on-surface-variant">
@@ -716,41 +630,6 @@ export default function TodayView() {
         </aside>
       </div>
 
-      <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-on-surface">Projects and life areas</h3>
-            <p className="text-sm text-on-surface-variant">Context buckets from the vault. These become project pages later.</p>
-          </div>
-          <button
-            onClick={createProject}
-            disabled={projectCreateStatus === 'saving'}
-            className="rounded-lg border border-border px-3 py-2 text-sm text-on-surface-variant hover:bg-surface-variant disabled:opacity-50"
-          >
-            {projectCreateStatus === 'saving' ? 'Creating...' : 'New project'}
-          </button>
-        </div>
-        {projectCreateStatus === 'error' && (
-          <p className="mb-3 text-sm text-error">Could not create project.</p>
-        )}
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {projectContexts.map((project) => (
-            <article key={project.id} className="rounded-lg border border-border bg-surface-variant p-3">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-primary">{project.icon}</span>
-                  <h4 className="text-sm font-semibold text-on-surface">{project.title}</h4>
-                </div>
-                <span className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-on-surface-variant">
-                  {project.signal}
-                </span>
-              </div>
-              <p className="text-sm text-on-surface-variant">{project.summary}</p>
-              <p className="mt-3 text-sm font-medium text-on-surface">{project.next}</p>
-            </article>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

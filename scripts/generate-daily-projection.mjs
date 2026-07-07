@@ -179,6 +179,17 @@ async function main() {
 
   const reviewQueue = [
     task({
+      id: 'review-ai-publishing-series-history',
+      title: 'Review the old AI publishing series: drop it, or promote only what still matters.',
+      area: 'AI',
+      status: 'review',
+      source: 'structured/projects/ai-publishing-plan.json + current project dashboard decision logic',
+      horizon: 'this-week',
+      priority: 95,
+      projectId: 'ai',
+      detail: 'The June publishing plan is now historical. It should not stay in the active AI project plan unless a specific article is still relevant and gets promoted into the current timeline.',
+    }),
+    task({
       id: 'review-ai-workstreams',
       title: aiInsights?.suggestedActions?.[0]?.title || 'Define project extraction format.',
       area: 'AI',
@@ -188,6 +199,17 @@ async function main() {
       priority: 85,
       projectId: 'ai',
       detail: aiInsights?.suggestedActions?.[0]?.description || '',
+    }),
+    task({
+      id: 'review-health-running-reference',
+      title: 'Add a clear reference for the 5K quality run if the session is still unclear.',
+      area: 'Health',
+      status: 'review',
+      source: 'structured/health/5k-running-plan.json',
+      horizon: 'this-week',
+      priority: 75,
+      projectId: 'health',
+      detail: 'The Health timeline has a quality-run item but no visual/media reference. Either keep the text explanation, add a reference, or ask for a better example.',
     }),
     task({
       id: 'review-family-context',

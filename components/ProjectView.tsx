@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Brain,
   Archive,
@@ -129,6 +129,19 @@ interface SelectedVaultFile {
   mtime: number;
 }
 
+interface ProjectTimelineItem {
+  id: string;
+  priority: number;
+  dateLabel: string;
+  status: string;
+  title: string;
+  plan: string;
+  why?: string;
+  notDoneBecause?: string;
+  outcome?: string;
+  sourcePaths?: string[];
+}
+
 const projects: Record<string, { title: string; icon: React.ReactNode; summary: string; next: string; status: string }> = {
   business: {
     title: 'Business',
@@ -225,6 +238,91 @@ function iconForProject(icon?: string) {
   }
 }
 
+function formatProjectDate(dateValue?: string) {
+  if (!dateValue) return null;
+  return new Intl.DateTimeFormat('en-AU', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(`${dateValue}T00:00:00`));
+}
+
+function buildProjectTimelineItems(
+  project: { next: string },
+  insights: ProjectInsights | null,
+  sources: ProjectSources | null
+): ProjectTimelineItem[] {
+  if (insights?.backlog?.items?.length) {
+    return insights.backlog.items
+      .slice()
+      .sort((a, b) => b.priority - a.priority)
+      .map((item) => ({
+        id: item.id,
+        priority: item.priority,
+        dateLabel: formatProjectDate(item.targetDate) || item.horizon,
+        status: item.status,
+        title: item.title,
+        plan: item.desiredOutcome,
+        why: item.why,
+        notDoneBecause: item.notDoneBecause,
+        outcome: item.desiredOutcome,
+        sourcePaths: item.sourcePaths,
+      }));
+  }
+
+  if (insights?.suggestedActions?.length) {
+    return insights.suggestedActions.map((action, index) => ({
+      id: `action-${index}-${action.title}`,
+      priority: 100 - index * 10,
+      dateLabel: action.horizon,
+      status: 'suggested',
+      title: action.title,
+      plan: action.description,
+      outcome: action.target,
+      sourcePaths: [],
+    }));
+  }
+
+  if (insights?.workstreams?.length) {
+    return insights.workstreams.map((workstream, index) => ({
+      id: `workstream-${index}-${workstream.title}`,
+      priority: 90 - index * 10,
+      dateLabel: 'this-week',
+      status: 'review',
+      title: workstream.title,
+      plan: workstream.nextStep,
+      why: workstream.why,
+      sourcePaths: [],
+    }));
+  }
+
+  if (sources?.conversations?.length) {
+    return sources.conversations.slice(0, 8).map((conversation, index) => ({
+      id: `source-${conversation.conversationId}`,
+      priority: 90 - index * 5,
+      dateLabel: conversation.vaultDate
+        ? formatProjectDate(conversation.vaultDate) || conversation.vaultDate
+        : 'source',
+      status: 'review',
+      title: `Review: ${conversation.title}`,
+      plan: conversation.snippetFromProjectUi || 'Decide whether this discussion should stay as reference or become an active commitment.',
+      why: 'This source is linked to the project, but no current priority item has been promoted from it yet.',
+      notDoneBecause: 'Needs human review before it becomes current work.',
+      outcome: 'Keep as reference, dismiss it, or promote one concrete next step.',
+      sourcePaths: [conversation.rawPath],
+    }));
+  }
+
+  return [{
+    id: 'project-next-step',
+    priority: 100,
+    dateLabel: 'next',
+    status: 'candidate',
+    title: 'Next useful step',
+    plan: project.next,
+  }];
+}
+
 export default function ProjectView({ projectId }: ProjectViewProps) {
   const fallbackProject = projects[projectId] || projects.business;
   const [registryProject, setRegistryProject] = useState<RegistryProject | null>(null);
@@ -246,7 +344,7 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
       }
     : { ...fallbackProject, system: false };
   const [aiPlan, setAiPlan] = useState<ProjectPlan | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'sources'>('overview');
+  const [selectedTimelineId, setSelectedTimelineId] = useState<string | null>(null);
   const [sources, setSources] = useState<ProjectSources | null>(null);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [sourcesError, setSourcesError] = useState<string | null>(null);
@@ -280,10 +378,10 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
   }, [projectId]);
 
   useEffect(() => {
-    setActiveTab('overview');
     setSources(null);
     setSourcesError(null);
     setInsights(null);
+    setSelectedTimelineId(null);
     setSelectedFile(null);
     setFileContent(null);
   }, [projectId]);
@@ -319,9 +417,26 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
       .finally(() => setInsightsLoading(false));
   }, [projectId]);
 
-  const activeDay = aiPlan?.today ?? aiPlan?.upcoming ?? null;
   const sourceCount = sources?.conversations.length ?? 0;
   const sourceTitle = sources?.title || project.title;
+  const projectTimelineItems = useMemo(
+    () => buildProjectTimelineItems(project, insights, sources),
+    [project.next, insights, sources]
+  );
+  const selectedTimelineItem =
+    projectTimelineItems.find((item) => item.id === selectedTimelineId) ||
+    projectTimelineItems[0] ||
+    null;
+
+  useEffect(() => {
+    if (!projectTimelineItems.length) {
+      setSelectedTimelineId(null);
+      return;
+    }
+    if (!selectedTimelineId || !projectTimelineItems.some((item) => item.id === selectedTimelineId)) {
+      setSelectedTimelineId(projectTimelineItems[0].id);
+    }
+  }, [projectTimelineItems, selectedTimelineId]);
 
   const openVaultFile = async (relativePath: string) => {
     const name = relativePath.split('/').pop() || relativePath;
@@ -392,19 +507,24 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
 
   return (
     <div className="flex w-full max-w-[1440px] flex-col gap-4 pb-8">
-      <section className="rounded-lg border border-border bg-surface p-5 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-primary">
-          {project.icon}
-          <span className="text-xs font-semibold uppercase tracking-wide">Project / Life Area</span>
-        </div>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0" style={{ width: 'min(760px, 100%)' }}>
-            <h2 className="text-2xl font-semibold text-on-surface">{project.title}</h2>
-            <p className="mt-2 text-sm text-on-surface-variant">{project.summary}</p>
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-primary">
+              {project.icon}
+              <span className="text-xs font-semibold uppercase tracking-wide">{project.title}</span>
+            </div>
+            <h2 className="text-xl font-semibold text-on-surface">Plan timeline</h2>
+            <p className="text-sm text-on-surface-variant">
+              Current priorities, selected detail, and recorded source context in one place.
+            </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <span className="w-fit rounded border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
+            <span className="rounded border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
               {project.status}
+            </span>
+            <span className="rounded border border-primary/30 bg-active px-3 py-1.5 text-xs font-medium text-primary">
+              {projectTimelineItems.length} item{projectTimelineItems.length === 1 ? '' : 's'}
             </span>
             {!project.system && (
               <button
@@ -418,243 +538,173 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
             )}
           </div>
         </div>
-        {archiveStatus === 'error' && (
-          <p className="mt-3 text-sm text-error">Could not archive this project.</p>
+        {archiveStatus === 'error' && <p className="mb-3 text-sm text-error">Could not archive this project.</p>}
+
+        <div className="overflow-hidden rounded-lg border border-border">
+          <div className="grid grid-cols-[110px_130px_110px_1fr] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
+            <div>Plan</div>
+            <div>Target</div>
+            <div>Status</div>
+            <div>Plan</div>
+          </div>
+          <div className="max-h-[520px] overflow-y-auto">
+            {projectTimelineItems.map((item, index) => {
+              const isSelected = selectedTimelineItem?.id === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setSelectedTimelineId(item.id)}
+                  className={`grid w-full grid-cols-[110px_130px_110px_1fr] border-t border-border px-3 py-3 text-left text-sm ${
+                    isSelected ? 'bg-active' : index === 0 ? 'bg-hover' : 'bg-surface hover:bg-hover'
+                  }`}
+                >
+                  <div>
+                    <p className="font-semibold text-on-surface">P{item.priority}</p>
+                    {index === 0 && <p className="mt-1 text-xs text-on-surface-variant">current</p>}
+                  </div>
+                  <div className="text-on-surface-variant">{item.dateLabel}</div>
+                  <div>
+                    <span className="inline-flex rounded border border-border bg-surface px-2 py-0.5 text-xs text-on-surface-variant">
+                      {item.status}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-on-surface">{item.title}</h3>
+                    <p className="mt-1 text-on-surface-variant">{item.plan}</p>
+                    {item.notDoneBecause && (
+                      <p className="mt-2 w-fit rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-900">
+                        Not done: {item.notDoneBecause}
+                      </p>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+            {!projectTimelineItems.length && (
+              <div className="border-t border-border p-6 text-sm text-on-surface-variant">
+                No active project timeline yet.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {selectedTimelineItem && (
+        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <span className="rounded border border-primary/30 bg-active px-2 py-1 text-xs font-semibold uppercase text-primary">
+                Selected plan detail
+              </span>
+              <h2 className="mt-3 text-2xl font-semibold text-on-surface">{selectedTimelineItem.title}</h2>
+              <p className="mt-2 text-on-surface-variant">{selectedTimelineItem.plan}</p>
+            </div>
+            <span className="w-fit rounded border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
+              {selectedTimelineItem.dateLabel}
+            </span>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-3">
+            <div className="rounded-lg border border-border bg-surface-variant p-3">
+              <h3 className="text-xs font-semibold uppercase text-on-surface-variant">Why</h3>
+              <p className="mt-2 text-sm text-on-surface">
+                {selectedTimelineItem.why || insights?.summary || project.summary}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface-variant p-3">
+              <h3 className="text-xs font-semibold uppercase text-on-surface-variant">Outcome</h3>
+              <p className="mt-2 text-sm text-on-surface">
+                {selectedTimelineItem.outcome || selectedTimelineItem.plan}
+              </p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <h3 className="text-xs font-semibold uppercase text-amber-900">Decision needed</h3>
+              <p className="mt-2 text-sm text-amber-950">
+                {selectedTimelineItem.notDoneBecause || 'No blocker recorded. Keep, defer, or promote from assistant actions if context changes.'}
+              </p>
+            </div>
+          </div>
+
+          {Boolean(selectedTimelineItem.sourcePaths?.length) && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {selectedTimelineItem.sourcePaths?.map((sourcePath) => (
+                <button
+                  key={sourcePath}
+                  onClick={() => openVaultFile(sourcePath)}
+                  className="inline-flex items-center gap-1 rounded border border-primary/30 bg-surface px-2.5 py-1.5 text-xs text-primary hover:bg-active"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  {sourcePath.split('/').pop()}
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-on-surface">Recorded context</h2>
+            <p className="text-sm text-on-surface-variant">
+              Linked vault discussions and extracted notes that support the current plan.
+            </p>
+          </div>
+          <span className="w-fit rounded border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
+            {sourcesLoading ? 'Loading...' : `${sourceCount} source${sourceCount === 1 ? '' : 's'}`}
+          </span>
+        </div>
+
+        {sourcesError ? (
+          <p className="text-sm text-error">{sourcesError}</p>
+        ) : !sources?.conversations.length ? (
+          <p className="text-sm text-on-surface-variant">
+            No linked sources yet. Captures will stay readable in the vault until they are promoted into this project.
+          </p>
+        ) : (
+          <div className="grid gap-3 lg:grid-cols-3">
+            {sources.conversations.slice(0, 3).map((conversation) => (
+              <article key={conversation.conversationId} className="rounded-lg border border-border bg-surface-variant p-3">
+                <button
+                  onClick={() => openVaultFile(conversation.rawPath)}
+                  className="line-clamp-2 text-left text-sm font-semibold text-on-surface hover:text-primary"
+                >
+                  {conversation.title}
+                </button>
+                {conversation.snippetFromProjectUi && (
+                  <p className="mt-2 line-clamp-2 text-sm text-on-surface-variant">{conversation.snippetFromProjectUi}</p>
+                )}
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-on-surface-variant">
+                  <span>{conversation.vaultDate || 'No date'}</span>
+                  <span>{conversation.messageCount ?? 0} messages</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+
+        {insightsLoading && <p className="mt-3 text-xs text-on-surface-variant">Loading extracted project layer...</p>}
+        {insights?.currentFocus && (
+          <p className="mt-3 rounded border border-primary/20 bg-active px-3 py-2 text-sm text-on-surface">
+            <strong>Current focus:</strong> {insights.currentFocus}
+          </p>
         )}
       </section>
 
       <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-        <h3 className="text-base font-semibold text-on-surface">Next useful step</h3>
-        <p className="mt-2 text-sm text-on-surface-variant">{activeDay?.plan ?? project.next}</p>
-      </section>
-
-      <div className="flex flex-wrap items-center gap-2 border-b border-border">
-        {[
-          { id: 'overview' as const, label: 'Overview' },
-          { id: 'sources' as const, label: `Sources${sourceCount ? ` ${sourceCount}` : ''}` },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-              activeTab === tab.id
-                ? 'border-primary text-primary'
-                : 'border-transparent text-on-surface-variant hover:text-on-surface'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === 'overview' && projectId === 'ai' && aiPlan && (
-        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0" style={{ width: 'min(760px, 100%)' }}>
-              <h3 className="text-base font-semibold text-on-surface">{aiPlan.title}</h3>
-              <p className="mt-1 text-sm text-on-surface-variant">{aiPlan.goal}</p>
-            </div>
-            {activeDay && (
-              <span className="w-fit rounded border border-primary/30 bg-active px-3 py-1.5 text-xs font-medium text-primary">
-                {aiPlan.today ? 'Today' : 'Next'}: Day {activeDay.day}
-              </span>
-            )}
-          </div>
-          <div className="rounded-lg border-l-4 border-orange-500 bg-orange-50 px-3 py-2">
-            <p className="text-sm text-on-surface"><strong>Rule:</strong> {aiPlan.rule}</p>
-          </div>
-          <div className="mt-4 overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[84px_120px_120px_1fr] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
-              <div>Day</div>
-              <div>Date</div>
-              <div>Type</div>
-              <div>Plan</div>
-            </div>
-            {aiPlan.days.map((day) => {
-              const isActive = day.day === activeDay?.day;
-              const isPast = day.date < aiPlan.todayDate;
-              return (
-                <div
-                  key={day.day}
-                  className={`grid grid-cols-[84px_120px_120px_1fr] border-t border-border px-3 py-3 text-sm ${
-                    isActive ? 'bg-active' : isPast ? 'bg-surface text-on-surface-variant opacity-70' : 'bg-surface'
-                  }`}
-                >
-                  <div className="font-semibold text-on-surface">Day {day.day}</div>
-                  <div className="text-on-surface-variant">{day.label}</div>
-                  <div>
-                    <span className="rounded border border-border bg-surface-variant px-2 py-0.5 text-xs text-on-surface-variant">
-                      {day.kind}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="font-medium text-on-surface">{day.title}</p>
-                    <p className="mt-1 text-on-surface-variant">{day.plan}</p>
-                    {day.output && <p className="mt-2 text-xs text-on-surface-variant"><strong>Output:</strong> {day.output}</p>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {activeTab === 'overview' && projectId === 'ai' && insights?.backlog && (
-        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0" style={{ width: 'min(860px, 100%)' }}>
-              <h3 className="text-base font-semibold text-on-surface">{insights.backlog.title}</h3>
-              <p className="mt-1 text-sm text-on-surface-variant">{insights.backlog.goal}</p>
-            </div>
-            <span className="w-fit rounded border border-primary/30 bg-active px-3 py-1.5 text-xs font-medium text-primary">
-              Priority backlog
-            </span>
-          </div>
-          <div className="mb-4 rounded-lg border-l-4 border-primary bg-active px-3 py-2">
-            <p className="text-sm text-on-surface"><strong>Why this matters:</strong> {insights.backlog.whyThisMatters}</p>
-          </div>
-          <div className="overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[84px_120px_120px_minmax(0,1fr)] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
-              <div>Priority</div>
-              <div>Status</div>
-              <div>Target</div>
-              <div>Item</div>
-            </div>
-            {insights.backlog.items
-              .slice()
-              .sort((a, b) => b.priority - a.priority)
-              .map((item) => (
-                <div key={item.id} className="grid grid-cols-[84px_120px_120px_minmax(0,1fr)] border-t border-border px-3 py-3 text-sm">
-                  <div className="font-semibold text-primary">{item.priority}</div>
-                  <div>
-                    <span className="rounded border border-border bg-surface-variant px-2 py-0.5 text-xs text-on-surface-variant">
-                      {item.status}
-                    </span>
-                  </div>
-                  <div className="text-on-surface-variant">{item.targetDate || item.horizon}</div>
-                  <div className="min-w-0">
-                    <h4 className="font-semibold text-on-surface">{item.title}</h4>
-                    <p className="mt-1 text-on-surface-variant"><strong>Why:</strong> {item.why}</p>
-                    <p className="mt-1 text-on-surface-variant"><strong>Not done because:</strong> {item.notDoneBecause}</p>
-                    <p className="mt-1 text-on-surface"><strong>Outcome:</strong> {item.desiredOutcome}</p>
-                    {Boolean(item.sourcePaths?.length) && (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {item.sourcePaths?.map((sourcePath) => (
-                          <button
-                            key={sourcePath}
-                            onClick={() => openVaultFile(sourcePath)}
-                            className="rounded border border-border bg-surface px-2 py-1 text-xs text-primary hover:bg-active"
-                          >
-                            {sourcePath.split('/').pop()}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-          </div>
-        </section>
-      )}
-
-      {activeTab === 'overview' && (
-        <>
-          {insights && (
-            <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-              <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0" style={{ width: 'min(820px, 100%)' }}>
-                  <h3 className="text-base font-semibold text-on-surface">Source-derived layer</h3>
-                  <p className="mt-2 text-sm text-on-surface-variant">{insights.summary}</p>
-                </div>
-                <span className="w-fit rounded border border-primary/30 bg-active px-3 py-1.5 text-xs font-medium text-primary">
-                  Extracted
-                </span>
-              </div>
-
-              {insights.currentFocus && (
-                <div className="rounded-lg border-l-4 border-primary bg-active px-3 py-2">
-                  <p className="text-sm text-on-surface"><strong>Current focus:</strong> {insights.currentFocus}</p>
-                </div>
-              )}
-
-              {Boolean(insights.workstreams?.length) && (
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                  {insights.workstreams?.map((item) => (
-                    <div key={item.title} className="rounded-lg border border-border bg-surface p-3">
-                      <h4 className="text-sm font-semibold text-on-surface">{item.title}</h4>
-                      <p className="mt-1 text-sm text-on-surface-variant">{item.why}</p>
-                      <p className="mt-2 text-sm text-on-surface"><strong>Next:</strong> {item.nextStep}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {Boolean(insights.suggestedActions?.length) && (
-                <div className="mt-4 overflow-hidden rounded-lg border border-border">
-                  <div className="bg-surface-variant px-3 py-2 text-xs font-semibold uppercase text-on-surface-variant">
-                    Suggested actions
-                  </div>
-                  {insights.suggestedActions?.map((action) => (
-                    <div key={action.title} className="border-t border-border p-3">
-                      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                          <h4 className="text-sm font-semibold text-on-surface">{action.title}</h4>
-                          <p className="mt-1 text-sm text-on-surface-variant">{action.description}</p>
-                        </div>
-                        <span className="w-fit rounded border border-border bg-surface px-2 py-1 text-xs text-on-surface-variant">
-                          {action.horizon}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-
-          <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-            <h3 className="text-base font-semibold text-on-surface">Vault connection</h3>
-            <p className="mt-2 text-sm text-on-surface-variant">
-              This project is connected to {sourceCount || 'no'} indexed source discussion{sourceCount === 1 ? '' : 's'}.
-              {insightsLoading && ' Loading extracted project layer...'}
-              {!insights && !insightsLoading && ' The next layer should summarize those sources into project overview, decisions, actions, and open questions.'}
-            </p>
-            {sources?.chatgptProjectTemplateId && (
-              <p className="mt-3 text-xs text-on-surface-variant">
-                ChatGPT project template: <span className="font-mono">{sources.chatgptProjectTemplateId}</span>
-              </p>
-            )}
-          </section>
-        </>
-      )}
-
-      {activeTab === 'sources' && (
-        <section className="rounded-lg border border-border bg-surface shadow-sm">
-          <div className="border-b border-border p-4">
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <h3 className="text-base font-semibold text-on-surface">{sourceTitle} sources</h3>
-                <p className="mt-1 text-sm text-on-surface-variant">
-                  Linked raw discussions. These are evidence for summaries and actions, not the main project experience.
-                </p>
-              </div>
-              <span className="w-fit rounded border border-border bg-surface-variant px-3 py-1.5 text-xs text-on-surface-variant">
-                {sourceCount} linked
-              </span>
-            </div>
-          </div>
-
-          {sourcesLoading ? (
-            <div className="p-6 text-sm text-on-surface-variant">Loading project sources...</div>
-          ) : sourcesError ? (
-            <div className="p-6 text-sm text-error">{sourcesError}</div>
-          ) : !sources?.conversations.length ? (
-            <div className="p-6 text-sm text-on-surface-variant">
-              No project sources are indexed yet.
-            </div>
-          ) : (
-            <div className="divide-y divide-border">
-              {sources.conversations.map((conversation) => (
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold text-on-surface">
+            Reference sources{sourceCount ? ` (${sourceCount})` : ''}
+          </summary>
+          <div className="mt-4 divide-y divide-border rounded-lg border border-border">
+            {sourcesLoading ? (
+              <div className="p-4 text-sm text-on-surface-variant">Loading project sources...</div>
+            ) : sourcesError ? (
+              <div className="p-4 text-sm text-error">{sourcesError}</div>
+            ) : !sources?.conversations.length ? (
+              <div className="p-4 text-sm text-on-surface-variant">No project sources are indexed yet.</div>
+            ) : (
+              sources.conversations.map((conversation) => (
                 <div key={conversation.conversationId} className="flex items-start gap-3 p-4 hover:bg-hover">
                   <FileText className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
                   <div className="min-w-0 flex-1">
@@ -684,11 +734,11 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
                     <ExternalLink className="h-4 w-4" />
                   </button>
                 </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
+              ))
+            )}
+          </div>
+        </details>
+      </section>
 
       <MarkdownModal
         file={selectedFile}

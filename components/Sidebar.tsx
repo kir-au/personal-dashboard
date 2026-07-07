@@ -14,6 +14,7 @@ import {
   Landmark,
   LayoutDashboard,
   Plane,
+  Plus,
   Repeat,
   Sparkles,
   TrendingUp,
@@ -68,6 +69,7 @@ export default function Sidebar({ currentView, onViewChange, mobileOpen = false,
   const [sidebarWidth, setSidebarWidth] = useState(256);
   const [recentCount, setRecentCount] = useState<number | undefined>(undefined);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [projectCreateStatus, setProjectCreateStatus] = useState<'idle' | 'saving' | 'error'>('idle');
   const drawerCollapsed = sidebarWidth < 132 && !mobileOpen;
 
   useEffect(() => {
@@ -201,6 +203,36 @@ export default function Sidebar({ currentView, onViewChange, mobileOpen = false,
     },
   }));
 
+  const createProject = async () => {
+    const title = window.prompt('New project name');
+    if (!title?.trim()) return;
+
+    setProjectCreateStatus('saving');
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || 'Failed to create project');
+
+      window.dispatchEvent(new Event('projects-changed'));
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('view', 'project');
+        url.searchParams.set('project', data.project.id);
+        window.history.replaceState(null, '', url.toString());
+      }
+      onViewChange('project');
+      onMobileClose?.();
+      setProjectCreateStatus('idle');
+    } catch {
+      setProjectCreateStatus('error');
+      window.setTimeout(() => setProjectCreateStatus('idle'), 3000);
+    }
+  };
+
   return (
     <>
       <div
@@ -278,10 +310,36 @@ export default function Sidebar({ currentView, onViewChange, mobileOpen = false,
         </div>
 
         <div className="mt-5 px-3">
-          <h3 className={`text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2 ${drawerCollapsed ? 'text-center' : 'px-3'}`}>
-            {drawerCollapsed ? '·' : 'Projects'}
-          </h3>
+          <div className={`mb-2 flex items-center ${drawerCollapsed ? 'justify-center' : 'justify-between px-3'}`}>
+            <h3 className="text-xs font-medium uppercase tracking-wider text-on-surface-variant">
+              {drawerCollapsed ? '·' : 'Projects'}
+            </h3>
+            <button
+              type="button"
+              onClick={createProject}
+              disabled={projectCreateStatus === 'saving'}
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-on-surface-variant transition-colors hover:border-border hover:bg-surface-variant hover:text-primary disabled:opacity-50 ${
+                drawerCollapsed ? 'hidden' : ''
+              }`}
+              title={projectCreateStatus === 'error' ? 'Could not create project' : 'New project'}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
           <ul className="space-y-1">
+            {drawerCollapsed && (
+              <li>
+                <button
+                  type="button"
+                  onClick={createProject}
+                  disabled={projectCreateStatus === 'saving'}
+                  className="flex w-full items-center justify-center rounded-lg px-3 py-2 text-sm text-on-surface hover:bg-surface-variant disabled:opacity-50"
+                  title={projectCreateStatus === 'error' ? 'Could not create project' : 'New project'}
+                >
+                  <Plus className="h-4 w-4 text-on-surface-variant" />
+                </button>
+              </li>
+            )}
             {contextItems.map((item) => (
               <li key={item.id}>
                 <button

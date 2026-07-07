@@ -153,7 +153,7 @@ export default function HealthView() {
         const initialDay = planDays.find((day) => day.day === requestedDay) || planData.today || planData.upcoming || planDays[0] || null;
         setSelectedDayNumber(initialDay?.day || null);
         const firstTodayCode = extractExerciseCodes(initialDay?.plan || '', exerciseData.exercises || [])[0];
-        setSelectedExerciseCode(firstTodayCode || exerciseData.exercises?.[0]?.code || null);
+        setSelectedExerciseCode(firstTodayCode || null);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -199,7 +199,7 @@ export default function HealthView() {
       window.history.replaceState(null, '', url.toString());
     }
     const firstCode = extractExerciseCodes(day.plan, exerciseLibrary)[0];
-    if (firstCode) setSelectedExerciseCode(firstCode);
+    setSelectedExerciseCode(firstCode || null);
   };
 
   if (loading) {
@@ -322,7 +322,7 @@ export default function HealthView() {
         </div>
       </section>
 
-      {selectedExercise && (
+      {selectedExercise ? (
         <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
           <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
             <div className="overflow-hidden rounded-lg border border-border bg-surface-variant">
@@ -368,7 +368,73 @@ export default function HealthView() {
             </div>
           </div>
         </section>
-      )}
+      ) : selectedDay ? (
+        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div className="mb-2 flex items-center gap-2 text-primary">
+            <ImageIcon className="h-4 w-4" />
+            <span className="text-xs font-semibold uppercase tracking-wide">Selected plan detail</span>
+          </div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <h3 className="text-xl font-semibold text-on-surface">{selectedDay.title}</h3>
+              <p className="mt-1 text-sm text-on-surface-variant">{selectedDay.plan}</p>
+            </div>
+            <span className={`inline-flex w-fit rounded border px-2 py-0.5 text-xs ${kindStyle[selectedDay.kind] || kindStyle.plan}`}>
+              {selectedDay.kind}
+            </span>
+          </div>
+
+          {selectedDay.kind === 'run-quality' ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border border-border bg-surface-variant p-3">
+                <p className="text-xs font-semibold uppercase text-on-surface-variant">Session</p>
+                <p className="mt-1 text-sm text-on-surface">
+                  Controlled intervals: run 500m, recover for 60 seconds, repeat for the planned count.
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-surface-variant p-3">
+                <p className="text-xs font-semibold uppercase text-on-surface-variant">Execution</p>
+                <p className="mt-1 text-sm text-on-surface">
+                  Keep the effort repeatable, not all-out. Warm up first and stop if post-laser recovery is not green.
+                </p>
+              </div>
+              <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+                <p className="text-xs font-semibold uppercase text-orange-700">Needs reference</p>
+                <p className="mt-1 text-sm text-on-surface">
+                  No exercise media is attached yet. If this remains unclear, add a running reference to the Health plan.
+                </p>
+              </div>
+            </div>
+          ) : selectedDay.kind === 'run-long' ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border border-border bg-surface-variant p-3">
+                <p className="text-xs font-semibold uppercase text-on-surface-variant">Session</p>
+                <p className="mt-1 text-sm text-on-surface">
+                  Conversational long run. The goal is aerobic volume, not pace.
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-surface-variant p-3">
+                <p className="text-xs font-semibold uppercase text-on-surface-variant">Execution</p>
+                <p className="mt-1 text-sm text-on-surface">
+                  Stay easy enough to speak in full sentences and keep recovery constraints visible.
+                </p>
+              </div>
+              <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+                <p className="text-xs font-semibold uppercase text-orange-700">Avoid</p>
+                <p className="mt-1 text-sm text-on-surface">
+                  Do not turn this into a race effort or add intensity if recovery is not green.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-lg border border-border bg-surface-variant p-3">
+              <p className="text-sm text-on-surface-variant">
+                No exercise media is linked for this selected item. Log completion or add a reference if this plan needs more detail.
+              </p>
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <details>
