@@ -26,6 +26,14 @@ interface ProjectRecord {
   archived?: boolean;
 }
 
+interface CaptureAction {
+  id: string;
+  label: string;
+  description: string;
+  processorId?: string;
+  recordType?: string;
+}
+
 function slugify(value: string) {
   return value
     .toLowerCase()
@@ -108,13 +116,19 @@ function routeCapture(input: string, projects: ProjectRecord[], explicitProjectI
 
   const primaryProject = ranked[0];
   const candidates = ranked.length ? ranked : [{ id: 'inbox', title: 'Vault inbox', score: 0 }];
-  const actions = [
+  const actions: Array<CaptureAction | null> = [
     { id: 'leave-in-inbox', label: 'Leave in inbox', description: 'Save only as raw capture for later review.' },
     primaryProject && primaryProject.id !== 'inbox'
       ? { id: 'link-to-project', label: `Link to ${primaryProject.title}`, description: 'Attach this capture as source evidence for the project.' }
       : null,
     intent === 'workout'
-      ? { id: 'log-health-workout', label: 'Log health workout', description: 'Turn this capture into a structured health entry after review.' }
+      ? {
+          id: 'apply-structured-update',
+          label: 'Update structured state',
+          description: 'Apply this capture through the selected project processor after review.',
+          processorId: 'health.activity',
+          recordType: 'activity_log',
+        }
       : null,
     intent === 'achievement'
       ? { id: 'add-today-achievement', label: 'Add to today achievement', description: 'Show this as something completed today.' }

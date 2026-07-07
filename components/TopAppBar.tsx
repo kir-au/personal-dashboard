@@ -12,9 +12,14 @@ import {
   MoreVertical,
   Moon,
   Sun,
-  Menu
+  Menu,
+  MessageSquareText,
+  Mic,
+  Send,
+  Square,
+  X
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface TopAppBarProps {
   currentView?: string;
@@ -27,11 +32,26 @@ interface TopAppBarProps {
 export default function TopAppBar({ currentView, searchQuery, onSearchQueryChange, onMenuClick }: TopAppBarProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [captureText, setCaptureText] = useState('');
+  const [captureSource, setCaptureSource] = useState<'manual' | 'voice'>('manual');
+  const [captureStatus, setCaptureStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [lastSavedPath, setLastSavedPath] = useState<string | null>(null);
+  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'recording' | 'transcribing' | 'error'>('idle');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const [authStatus, setAuthStatus] = useState<{
     enabled: boolean;
     user: { name?: string | null; email?: string | null; image?: string | null } | null;
   } | null>(null);
   const isVaultView = currentView === 'browse';
+  const capturePlaceholder =
+    currentView === 'health'
+      ? 'Log health update: exercise, food, weight, pain, symptoms, recovery...'
+      : currentView === 'today'
+        ? 'Tell vault what changed, what to move, or what to remember...'
+        : 'Capture note for this context...';
 
   useEffect(() => {
     const saved = window.localStorage.getItem('personal-dashboard-theme');
@@ -66,11 +86,120 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
     setSettingsOpen(false);
   };
 
+  const saveCapture = async () => {
+    const input = captureText.trim();
+    if (!input) return;
+
+    setCaptureStatus('saving');
+    try {
+      const res = await fetch('/api/capture', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input,
+          source: captureSource,
+          metadata: { surface: 'top-feedback-loop', currentView },
+        }),
+      });
+
+      if (!res.ok) throw new Error('Capture failed');
+      const data = await res.json();
+      setCaptureText('');
+      setCaptureSource('manual');
+      setLastSavedPath(data.path || null);
+      setCaptureStatus('saved');
+      fetch('/api/planner/regenerate', { method: 'POST' })
+        .then(() => window.dispatchEvent(new Event('planner-projection-changed')))
+        .catch(() => window.dispatchEvent(new Event('planner-projection-changed')));
+      window.setTimeout(() => setCaptureStatus('idle'), 3500);
+    } catch {
+      setCaptureStatus('error');
+    }
+  };
+
+  const stopRecording = () => {
+    recorderRef.current?.stop();
+  };
+
+  const startRecording = async () => {
+    if (voiceStatus === 'recording') {
+      stopRecording();
+      return;
+    }
+
+    if (typeof window === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setVoiceStatus('error');
+      setVoiceError('Voice recording is not supported in this browser.');
+      return;
+    }
+
+    try {
+      setVoiceError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : '';
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        const audio = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        recorderRef.current = null;
+
+        if (!audio.size) {
+          setVoiceStatus('error');
+          setVoiceError('No audio was recorded.');
+          return;
+        }
+
+        setVoiceStatus('transcribing');
+        try {
+          const form = new FormData();
+          form.set('audio', new File([audio], 'capture.webm', { type: audio.type || 'audio/webm' }));
+          const response = await fetch('/api/capture/transcribe', {
+            method: 'POST',
+            body: form,
+          });
+          const data = await response.json();
+          if (!response.ok || !data.ok) throw new Error(data.error || 'Transcription failed.');
+
+          setCaptureText((current) => [current.trim(), data.text?.trim()].filter(Boolean).join('\n'));
+          setCaptureSource('voice');
+          setCaptureStatus('idle');
+          setLastSavedPath(null);
+          setVoiceStatus('idle');
+        } catch (error) {
+          setVoiceStatus('error');
+          setVoiceError(error instanceof Error ? error.message : 'Transcription failed.');
+        }
+      };
+
+      recorder.start();
+      setVoiceStatus('recording');
+    } catch (error) {
+      setVoiceStatus('error');
+      setVoiceError(error instanceof Error ? error.message : 'Could not start recording.');
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+  };
+
   return (
     <header className="sticky top-0 z-40 bg-surface border-b border-border">
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className="grid grid-cols-[auto_minmax(360px,1fr)_auto] items-center gap-3 px-4 py-3 max-md:grid-cols-[auto_1fr_auto]">
         {/* Left section */}
-        <div className="flex items-center space-x-4">
+        <div className="flex shrink-0 items-center space-x-3">
           <button
             onClick={onMenuClick}
             className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-surface-variant md:hidden"
@@ -80,13 +209,9 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
           </button>
 
           {/* App logo/name */}
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center" title="Personal Dashboard">
               <span className="text-white font-bold text-sm">PD</span>
-            </div>
-            <div>
-              <h1 className="text-lg font-medium text-on-surface">Personal Dashboard</h1>
-              <p className="text-xs text-on-surface-variant">Daily surface powered by Personal Vault</p>
             </div>
           </div>
 
@@ -113,8 +238,79 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
           )}
         </div>
 
+        <div className="relative hidden min-w-[360px] md:block" data-capture-loop>
+          <div className="mx-auto flex w-full max-w-5xl items-center gap-2 rounded-lg border border-border bg-surface-variant px-3 py-1.5 focus-within:border-primary focus-within:bg-surface">
+            <MessageSquareText className="h-4 w-4 shrink-0 text-primary" />
+            <input
+              type="text"
+              value={captureText}
+              onChange={(event) => {
+                setCaptureText(event.target.value);
+                setCaptureSource('manual');
+                if (captureStatus !== 'idle') setCaptureStatus('idle');
+                if (lastSavedPath) setLastSavedPath(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  saveCapture();
+                }
+              }}
+              placeholder={capturePlaceholder}
+              className="min-w-[240px] flex-1 border-none bg-transparent text-sm text-on-surface outline-none placeholder:text-on-surface-variant/70"
+            />
+            {captureText && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCaptureText('');
+                  setCaptureSource('manual');
+                  setCaptureStatus('idle');
+                  setLastSavedPath(null);
+                }}
+                className="rounded p-1 hover:bg-hover"
+                title="Clear"
+              >
+                <X className="h-3.5 w-3.5 text-on-surface-variant" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={startRecording}
+              disabled={voiceStatus === 'transcribing'}
+              className={`inline-flex h-7 items-center gap-1 rounded border px-2.5 text-xs font-medium ${
+                voiceStatus === 'recording'
+                  ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                  : 'border-border bg-surface text-on-surface-variant hover:bg-hover'
+              } disabled:opacity-40`}
+              title={voiceStatus === 'recording' ? 'Stop recording' : 'Record voice capture'}
+            >
+              {voiceStatus === 'recording' ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+              {voiceStatus === 'recording' ? 'Stop' : voiceStatus === 'transcribing' ? 'Transcribing' : 'Voice'}
+            </button>
+            <button
+              type="button"
+              onClick={saveCapture}
+              disabled={!captureText.trim() || captureStatus === 'saving'}
+              className="inline-flex h-7 items-center gap-1 rounded bg-primary px-2.5 text-xs font-medium text-white disabled:opacity-40"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {captureStatus === 'saving' ? 'Saving' : 'Capture'}
+            </button>
+          </div>
+          {(captureStatus !== 'idle' || voiceStatus !== 'idle') && (
+            <div className="absolute left-1/2 top-11 z-50 w-full max-w-5xl -translate-x-1/2 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-on-surface-variant shadow-lg">
+              {captureStatus === 'saved' && `Saved to ${lastSavedPath || 'vault'}.`}
+              {captureStatus === 'error' && 'Save failed.'}
+              {voiceStatus === 'recording' && 'Recording. Press Stop when finished.'}
+              {voiceStatus === 'transcribing' && 'Transcribing voice capture...'}
+              {voiceStatus === 'error' && `Voice failed: ${voiceError}`}
+            </div>
+          )}
+        </div>
+
         {/* Right section */}
-        <div className="flex items-center space-x-2">
+        <div className="flex shrink-0 items-center justify-end space-x-2">
           {isVaultView && (
             <>
               <button 

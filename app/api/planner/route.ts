@@ -1,6 +1,20 @@
 import { NextResponse } from 'next/server';
+import fs from 'fs/promises';
+import path from 'path';
 
-export async function GET() {
+const VAULT_ROOT = path.join(process.env.HOME || '', 'personal-vault');
+const DAILY_PROJECTION_PATH = path.join(VAULT_ROOT, 'structured', 'plans', 'daily-projection.json');
+
+async function readDailyProjection() {
+  try {
+    const raw = await fs.readFile(DAILY_PROJECTION_PATH, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function fallbackProjection() {
   return NextResponse.json({
     title: 'Weekly plan from Personal Vault',
     weekFocus: 'Use the vault as the source of truth, then generate a small set of tasks that can move the day and week forward.',
@@ -48,4 +62,16 @@ export async function GET() {
       },
     ],
   });
+}
+
+export async function GET() {
+  const projection = await readDailyProjection();
+  if (projection) {
+    return NextResponse.json({
+      ...projection,
+      sourcePath: 'structured/plans/daily-projection.json',
+    });
+  }
+
+  return fallbackProjection();
 }

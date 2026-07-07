@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ExternalLink, Footprints, HeartPulse, Image as ImageIcon, RotateCcw } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Image as ImageIcon } from 'lucide-react';
 
 interface ExerciseKey {
   code: string;
@@ -12,11 +12,17 @@ interface RehabDay {
   day: number;
   date: string;
   label: string;
-  kind: 'home' | 'gym' | 'recovery' | 'off' | 'review';
+  kind: string;
   title: string;
   plan: string;
   completed: boolean;
   completionStatus?: 'partial' | 'completed';
+  planId?: string;
+  projectId?: string;
+  planTitle?: string;
+  planStatus?: string;
+  sourcePath?: string;
+  sourceDay?: number;
   actual?: {
     summary?: string;
     completed?: ActualExercise[];
@@ -48,6 +54,52 @@ interface RehabPlan {
   days: RehabDay[];
   todayDate: string;
   today: RehabDay | null;
+  upcoming?: RehabDay | null;
+  plans?: Array<{
+    id: string;
+    projectId: string;
+    title: string;
+    status: string;
+    startDate: string | null;
+    goal: string;
+    rule: string;
+    sourcePath: string;
+    today: RehabDay | null;
+    upcoming: RehabDay | null;
+    days: RehabDay[];
+    notes: string[];
+  }>;
+  activityLog?: HealthActivityEntry[];
+}
+
+interface HealthActivityEntry {
+  date: string;
+  loggedAt?: string;
+  updatedAt?: string;
+  source?: string;
+  rawPath?: string;
+  status: string;
+  summary: string;
+  activities?: LoggedActivity[];
+  calories?: {
+    method?: string;
+    bodyWeightKg?: number;
+    totalEstimatedCalories?: number;
+    assumptions?: string[];
+  };
+  notes?: string[];
+}
+
+interface LoggedActivity {
+  code: string;
+  name: string;
+  durationMin?: number | null;
+  distanceKm?: number | null;
+  pace?: string;
+  load?: string | null;
+  reps?: number | null;
+  met?: number;
+  estimatedCalories?: number | null;
 }
 
 interface Exercise {
@@ -65,12 +117,16 @@ interface ExerciseLibrary {
   exercises: Exercise[];
 }
 
-const kindStyle: Record<RehabDay['kind'], string> = {
+const kindStyle: Record<string, string> = {
   home: 'border-blue-300 bg-blue-50',
   gym: 'border-emerald-300 bg-emerald-50',
   recovery: 'border-amber-300 bg-amber-50',
   off: 'border-slate-300 bg-slate-50',
   review: 'border-violet-300 bg-violet-50',
+  'run-quality': 'border-red-300 bg-red-50',
+  'run-long': 'border-sky-300 bg-sky-50',
+  activity: 'border-emerald-300 bg-emerald-50',
+  plan: 'border-slate-300 bg-slate-50',
 };
 
 export default function HealthView() {
@@ -93,7 +149,8 @@ export default function HealthView() {
         const requestedDay = typeof window !== 'undefined'
           ? Number(new URLSearchParams(window.location.search).get('day'))
           : NaN;
-        const initialDay = planData.days?.find((day) => day.day === requestedDay) || planData.today || planData.days?.[0] || null;
+        const planDays = buildDisplayedDays(planData);
+        const initialDay = planDays.find((day) => day.day === requestedDay) || planData.today || planData.upcoming || planDays[0] || null;
         setSelectedDayNumber(initialDay?.day || null);
         const firstTodayCode = extractExerciseCodes(initialDay?.plan || '', exerciseData.exercises || [])[0];
         setSelectedExerciseCode(firstTodayCode || exerciseData.exercises?.[0]?.code || null);
@@ -106,13 +163,22 @@ export default function HealthView() {
   }, [exerciseLibrary]);
 
   const selectedExercise = selectedExerciseCode ? exerciseByCode[selectedExerciseCode] : null;
+  const activityByDate = useMemo(() => {
+    const map = new Map<string, HealthActivityEntry[]>();
+    for (const entry of plan?.activityLog || []) {
+      const entries = map.get(entry.date) || [];
+      entries.push(entry);
+      map.set(entry.date, entries);
+    }
+    return map;
+  }, [plan?.activityLog]);
+  const displayedDays = useMemo(() => {
+    return plan ? buildDisplayedDays(plan) : [];
+  }, [plan]);
   const selectedDay = useMemo(() => {
     if (!plan) return null;
-    return plan.days.find((day) => day.day === selectedDayNumber) || plan.today || plan.days[0] || null;
-  }, [plan, selectedDayNumber]);
-  const selectedDayCodes = useMemo(() => {
-    return extractExerciseCodes(selectedDay?.plan || '', exerciseLibrary);
-  }, [selectedDay, exerciseLibrary]);
+    return displayedDays.find((day) => day.day === selectedDayNumber) || plan.today || plan.upcoming || displayedDays[0] || null;
+  }, [displayedDays, plan, selectedDayNumber]);
 
   useEffect(() => {
     if (!selectedDayNumber) return;
@@ -146,104 +212,115 @@ export default function HealthView() {
 
   return (
     <div className="flex w-full max-w-[1440px] flex-col gap-4 pb-8">
-      {selectedDay && (
-        <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
-          <div className="rounded-lg border border-primary/30 bg-surface p-5 shadow-sm">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="rounded border border-primary/30 bg-active px-2 py-1 text-xs font-semibold uppercase text-primary">
-                {selectedDay.date === plan.todayDate ? 'Today' : 'Selected day'}
-              </span>
-              <span className="text-sm text-on-surface-variant">
-                Week {Math.ceil(selectedDay.day / 7)} / Day {selectedDay.day} · {selectedDay.label}
-              </span>
-            </div>
-            <h2 className="text-2xl font-semibold text-on-surface">{selectedDay.title}</h2>
-            <p className="mt-2 text-base text-on-surface">{selectedDay.plan}</p>
-
-            {selectedDay.actual?.completed?.length ? (
-              <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-emerald-700">
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span className="text-sm font-semibold">
-                      {selectedDay.completed ? 'Done today' : 'Logged so far'}
-                    </span>
-                  </div>
-                  {selectedDay.completionStatus && (
-                    <span className="rounded border border-emerald-300 bg-white px-2 py-0.5 text-xs text-emerald-700">
-                      {selectedDay.completionStatus}
-                    </span>
-                  )}
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                  {selectedDay.actual.completed.map((item) => (
-                    <div key={item.code} className="rounded border border-emerald-200 bg-white px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <span className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">{item.code}</span>
-                        <span className="truncate text-sm font-semibold text-on-surface">{item.name}</span>
-                      </div>
-                      <p className="mt-1 text-sm text-on-surface-variant">{formatActualExercise(item)}</p>
-                    </div>
-                  ))}
-                </div>
-                {selectedDay.actual.remaining?.length ? (
-                  <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2">
-                    <p className="text-xs font-semibold uppercase text-amber-700">Still open</p>
-                    <p className="mt-1 text-sm text-on-surface">{selectedDay.actual.remaining.join('; ')}</p>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm font-medium text-emerald-700">All planned items are closed.</p>
-                )}
-              </div>
-            ) : null}
-
-            {selectedDayCodes.length > 0 && (
-              <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {selectedDayCodes.map((code) => {
-                  const exercise = exerciseByCode[code];
-                  return (
-                    <button
-                      key={code}
-                      onClick={() => setSelectedExerciseCode(code)}
-                      className={`min-h-20 rounded-lg border p-3 text-left transition-colors ${
-                        selectedExerciseCode === code
-                          ? 'border-primary bg-active shadow-sm'
-                          : 'border-border bg-surface-variant hover:border-primary/50 hover:bg-hover'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`rounded px-2 py-1 text-xs font-semibold ${
-                          selectedExerciseCode === code ? 'bg-primary text-white' : 'bg-surface text-primary'
-                        }`}>
-                          {code}
-                        </span>
-                        <span className="text-sm font-semibold text-on-surface">{exercise?.name || code}</span>
-                      </div>
-                      {exercise?.dose && (
-                        <p className="mt-2 text-xs text-on-surface-variant">{exercise.dose}</p>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+      <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-on-surface">Plan timeline</h3>
+            <p className="text-xs text-on-surface-variant">Plan, logged activity, completion, and calories in one place.</p>
           </div>
+          <span className="text-xs text-on-surface-variant">
+            {displayedDays[0]?.label} - {displayedDays[displayedDays.length - 1]?.label}
+          </span>
+        </div>
 
-          <aside className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-            <div className="mb-2 flex items-center gap-2 text-primary">
-              <HeartPulse className="h-4 w-4" />
-              <span className="text-xs font-semibold uppercase tracking-wide">Health / Shoulder Rehab</span>
-            </div>
-            <h3 className="text-base font-semibold text-on-surface">{plan.title}</h3>
-            <p className="mt-2 text-sm text-on-surface-variant">{plan.goal}</p>
-            <div className="mt-3 rounded-lg border-l-4 border-orange-500 bg-orange-50 px-3 py-2">
-              <p className="text-sm text-on-surface">
-                <strong>Rule:</strong> {plan.rule}
-              </p>
-            </div>
-          </aside>
-        </section>
-      )}
+        <div className="overflow-hidden rounded-lg border border-border">
+          <div className="grid grid-cols-[140px_112px_120px_1fr] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
+            <div>Plan</div>
+            <div>Date</div>
+            <div>Type</div>
+            <div>Plan</div>
+          </div>
+          <div ref={timelineRef} className="max-h-[460px] overflow-y-auto scroll-smooth">
+            {displayedDays.map((day) => {
+              const isToday = day.date === plan.todayDate;
+              const isSelected = day.day === selectedDay?.day;
+              const isPast = plan.today && day.date < plan.todayDate;
+              const dayActivities = activityByDate.get(day.date) || [];
+              const loggedCalories = dayActivities.reduce((sum, entry) => sum + (entry.calories?.totalEstimatedCalories || 0), 0);
+              return (
+                <div
+                  key={`${day.date}-${day.day}`}
+                  ref={(node) => {
+                    dayRefs.current[day.day] = node;
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => selectDay(day)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      selectDay(day);
+                    }
+                  }}
+                  className={`grid w-full grid-cols-[140px_112px_120px_1fr] border-t border-border px-3 py-3 text-left text-sm transition-colors hover:bg-hover ${
+                    isSelected ? 'bg-active' : isToday ? 'bg-blue-50' : isPast ? 'bg-surface text-on-surface-variant opacity-70' : 'bg-surface'
+                  }`}
+                >
+                  <div>
+                    <p className="font-semibold text-on-surface">{day.planTitle || 'Health'}</p>
+                    {day.sourceDay ? (
+                      <p className="mt-1 text-xs text-on-surface-variant">
+                        {day.projectId === '5k-running' ? `Week ${day.sourceDay}` : `Day ${day.sourceDay}`}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="text-on-surface-variant">{day.label}</div>
+                  <div>
+                    <span className={`inline-flex rounded border px-2 py-0.5 text-xs ${kindStyle[day.kind] || kindStyle.plan}`}>
+                      {day.kind}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-on-surface">{day.title}</p>
+                      <p className="mt-1 text-on-surface-variant">{day.plan}</p>
+                      {dayActivities.length > 0 && (
+                        <p className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
+                          Logged: {dayActivities.map((entry) => entry.summary).join(' / ')}
+                          {loggedCalories ? ` · ~${loggedCalories} kcal` : ''}
+                        </p>
+                      )}
+                      {day.actual?.summary && (
+                        <p className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
+                          Plan done: {day.actual.summary}
+                        </p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {extractExerciseCodes(day.plan, exerciseLibrary).map((code) => (
+                          <button
+                            key={`${day.day}-${code}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedExerciseCode(code);
+                            }}
+                            className="rounded border border-primary/30 bg-surface px-2 py-0.5 text-xs text-primary hover:bg-active"
+                          >
+                            {code}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <span
+                      className={`mt-1 rounded-full border p-1.5 ${
+                        day.completed
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                          : dayActivities.length
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                          : day.completionStatus === 'partial'
+                            ? 'border-amber-300 bg-amber-50 text-amber-700'
+                            : 'border-border text-on-surface-variant'
+                      }`}
+                      title={day.completed || dayActivities.length ? 'Completed/logged activity' : day.completionStatus === 'partial' ? 'Partially logged' : 'Not completed'}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
 
       {selectedExercise && (
         <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
@@ -294,99 +371,6 @@ export default function HealthView() {
       )}
 
       <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-on-surface">Plan timeline</h3>
-            <p className="text-xs text-on-surface-variant">Opens on the current selected day. Scroll up for completed days.</p>
-          </div>
-          <span className="text-xs text-on-surface-variant">
-            {plan.days[0]?.label} - {plan.days[plan.days.length - 1]?.label}
-          </span>
-        </div>
-
-        <div className="overflow-hidden rounded-lg border border-border">
-          <div className="grid grid-cols-[84px_112px_120px_1fr] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
-            <div>Day</div>
-            <div>Date</div>
-            <div>Type</div>
-            <div>Plan</div>
-          </div>
-          <div ref={timelineRef} className="max-h-[460px] overflow-y-auto scroll-smooth">
-            {plan.days.map((day) => {
-              const isToday = day.date === plan.todayDate;
-              const isSelected = day.day === selectedDay?.day;
-              const isPast = plan.today && day.date < plan.todayDate;
-              return (
-                <div
-                  key={day.day}
-                  ref={(node) => {
-                    dayRefs.current[day.day] = node;
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => selectDay(day)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      selectDay(day);
-                    }
-                  }}
-                  className={`grid w-full grid-cols-[84px_112px_120px_1fr] border-t border-border px-3 py-3 text-left text-sm transition-colors hover:bg-hover ${
-                    isSelected ? 'bg-active' : isToday ? 'bg-blue-50' : isPast ? 'bg-surface text-on-surface-variant opacity-70' : 'bg-surface'
-                  }`}
-                >
-                  <div className="font-semibold text-on-surface">Day {day.day}</div>
-                  <div className="text-on-surface-variant">{day.label}</div>
-                  <div>
-                    <span className={`inline-flex rounded border px-2 py-0.5 text-xs ${kindStyle[day.kind]}`}>
-                      {day.kind}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-on-surface">{day.title}</p>
-                      <p className="mt-1 text-on-surface-variant">{day.plan}</p>
-                      {day.actual?.summary && (
-                        <p className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
-                          Done: {day.actual.summary}
-                        </p>
-                      )}
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {extractExerciseCodes(day.plan, exerciseLibrary).map((code) => (
-                          <button
-                            key={`${day.day}-${code}`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSelectedExerciseCode(code);
-                            }}
-                            className="rounded border border-primary/30 bg-surface px-2 py-0.5 text-xs text-primary hover:bg-active"
-                          >
-                            {code}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <span
-                      className={`mt-1 rounded-full border p-1.5 ${
-                        day.completed
-                          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                          : day.completionStatus === 'partial'
-                            ? 'border-amber-300 bg-amber-50 text-amber-700'
-                            : 'border-border text-on-surface-variant'
-                      }`}
-                      title={day.completed ? 'Completed day' : day.completionStatus === 'partial' ? 'Partially logged' : 'Not completed'}
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <details>
           <summary className="cursor-pointer text-sm font-semibold text-on-surface">Exercise key reference</summary>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -407,31 +391,30 @@ export default function HealthView() {
         </details>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-2 flex items-center gap-2">
-            <Footprints className="h-4 w-4 text-primary" />
-            <h3 className="text-sm font-semibold text-on-surface">Walking/cardio</h3>
-          </div>
-          <p className="text-sm text-on-surface-variant">{plan.notes[0]}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-2 flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-orange-500" />
-            <h3 className="text-sm font-semibold text-on-surface">Do not add yet</h3>
-          </div>
-          <p className="text-sm text-on-surface-variant">{plan.notes[1]}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-2 flex items-center gap-2">
-            <RotateCcw className="h-4 w-4 text-violet-500" />
-            <h3 className="text-sm font-semibold text-on-surface">Progression</h3>
-          </div>
-          <p className="text-sm text-on-surface-variant">{plan.notes[2]}</p>
-        </div>
-      </section>
     </div>
   );
+}
+
+function buildDisplayedDays(plan: RehabPlan): RehabDay[] {
+  const days = [...(plan.days || [])];
+  const plannedDates = new Set(days.map((day) => day.date));
+  for (const entry of plan.activityLog || []) {
+    if (plannedDates.has(entry.date)) continue;
+    days.push({
+      day: 900000 + days.length,
+      date: entry.date,
+      label: formatShortDate(entry.date),
+      kind: 'activity',
+      title: 'Logged activity',
+      plan: entry.summary,
+      completed: true,
+      completionStatus: 'completed',
+      planId: 'activity-log',
+      projectId: 'health',
+      planTitle: 'Health activity',
+    });
+  }
+  return days.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function extractExerciseCodes(planText: string, exercises: Exercise[]) {
@@ -442,10 +425,10 @@ function extractExerciseCodes(planText: string, exercises: Exercise[]) {
   });
 }
 
-function formatActualExercise(item: ActualExercise) {
-  const parts = [];
-  if (item.load) parts.push(item.load);
-  if (item.sets) parts.push(`${item.sets} sets`);
-  if (item.reps) parts.push(`${item.reps} reps`);
-  return parts.length ? parts.join(' / ') : 'done';
+function formatShortDate(dateValue: string) {
+  return new Intl.DateTimeFormat('en-AU', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(`${dateValue}T00:00:00`));
 }

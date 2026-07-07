@@ -92,6 +92,23 @@ interface ProjectInsights {
   currentFocus?: string;
   workstreams?: ProjectInsightWorkstream[];
   suggestedActions?: ProjectInsightAction[];
+  backlog?: {
+    title: string;
+    goal: string;
+    whyThisMatters: string;
+    items: Array<{
+      id: string;
+      title: string;
+      status: string;
+      priority: number;
+      horizon: string;
+      targetDate?: string;
+      why: string;
+      notDoneBecause: string;
+      desiredOutcome: string;
+      sourcePaths?: string[];
+    }>;
+  };
 }
 
 interface RegistryProject {
@@ -478,6 +495,64 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
                 </div>
               );
             })}
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'overview' && projectId === 'ai' && insights?.backlog && (
+        <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0" style={{ width: 'min(860px, 100%)' }}>
+              <h3 className="text-base font-semibold text-on-surface">{insights.backlog.title}</h3>
+              <p className="mt-1 text-sm text-on-surface-variant">{insights.backlog.goal}</p>
+            </div>
+            <span className="w-fit rounded border border-primary/30 bg-active px-3 py-1.5 text-xs font-medium text-primary">
+              Priority backlog
+            </span>
+          </div>
+          <div className="mb-4 rounded-lg border-l-4 border-primary bg-active px-3 py-2">
+            <p className="text-sm text-on-surface"><strong>Why this matters:</strong> {insights.backlog.whyThisMatters}</p>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-border">
+            <div className="grid grid-cols-[84px_120px_120px_minmax(0,1fr)] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
+              <div>Priority</div>
+              <div>Status</div>
+              <div>Target</div>
+              <div>Item</div>
+            </div>
+            {insights.backlog.items
+              .slice()
+              .sort((a, b) => b.priority - a.priority)
+              .map((item) => (
+                <div key={item.id} className="grid grid-cols-[84px_120px_120px_minmax(0,1fr)] border-t border-border px-3 py-3 text-sm">
+                  <div className="font-semibold text-primary">{item.priority}</div>
+                  <div>
+                    <span className="rounded border border-border bg-surface-variant px-2 py-0.5 text-xs text-on-surface-variant">
+                      {item.status}
+                    </span>
+                  </div>
+                  <div className="text-on-surface-variant">{item.targetDate || item.horizon}</div>
+                  <div className="min-w-0">
+                    <h4 className="font-semibold text-on-surface">{item.title}</h4>
+                    <p className="mt-1 text-on-surface-variant"><strong>Why:</strong> {item.why}</p>
+                    <p className="mt-1 text-on-surface-variant"><strong>Not done because:</strong> {item.notDoneBecause}</p>
+                    <p className="mt-1 text-on-surface"><strong>Outcome:</strong> {item.desiredOutcome}</p>
+                    {Boolean(item.sourcePaths?.length) && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {item.sourcePaths?.map((sourcePath) => (
+                          <button
+                            key={sourcePath}
+                            onClick={() => openVaultFile(sourcePath)}
+                            className="rounded border border-border bg-surface px-2 py-1 text-xs text-primary hover:bg-active"
+                          >
+                            {sourcePath.split('/').pop()}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
           </div>
         </section>
       )}

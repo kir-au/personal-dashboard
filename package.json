@@ -6,9 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "import:chatgpt": "node scripts/import-chatgpt-export.mjs"
+    "mcp:vault": "node mcp/personal-vault-server.mjs",
+    "import:chatgpt": "node scripts/import-chatgpt-export.mjs",
+    "generate:projection": "node scripts/generate-daily-projection.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "canvas": "^3.2.3",
     "clsx": "^2.1.1",
     "gray-matter": "^4.0.3",
@@ -28,7 +31,8 @@
     "remark-rehype": "^11.1.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

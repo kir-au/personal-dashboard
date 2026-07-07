@@ -8,11 +8,9 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   CheckCircle2,
-  Circle,
   Dumbbell,
   Folder,
   HeartPulse,
-  MessageSquareText,
   Sparkles,
   Target,
   TrendingUp,
@@ -22,9 +20,14 @@ import {
 interface PlannerTask {
   id: string;
   title: string;
-  area: 'Product' | 'Health' | 'Family' | 'Admin';
-  status: 'suggested' | 'planned' | 'done';
+  area: 'Product' | 'Health' | 'Family' | 'Admin' | 'AI' | 'Business' | 'Wealth' | 'Routine';
+  status: 'suggested' | 'planned' | 'done' | 'review';
   source: string;
+  date?: string;
+  horizon?: string;
+  projectId?: string;
+  priority?: number;
+  detail?: string;
 }
 
 interface PlannerProjection {
@@ -42,6 +45,17 @@ interface ResumeData {
     changedSinceYesterday: string;
   };
   currentState?: Array<{ label: string; status: string }>;
+}
+
+interface HealthActivity {
+  code: string;
+  name: string;
+  durationMin?: number | null;
+  distanceKm?: number | null;
+  pace?: string;
+  load?: string | null;
+  reps?: number | null;
+  estimatedCalories?: number | null;
 }
 
 interface HealthToday {
@@ -62,6 +76,21 @@ interface HealthToday {
   };
   lastWorkout: string | null;
   openQuestions: string[];
+  todayActivity?: {
+    date: string;
+    loggedAt: string;
+    status: string;
+    summary: string;
+    rawPath?: string;
+    activities?: HealthActivity[];
+    calories?: {
+      method?: string;
+      bodyWeightKg?: number;
+      totalEstimatedCalories?: number;
+      assumptions?: string[];
+    };
+    openQuestions?: string[];
+  };
 }
 
 interface RehabDay {
@@ -111,13 +140,6 @@ interface PublishingPlan {
   days?: PublishingDay[];
 }
 
-interface TimelineBlock {
-  time: string;
-  title: string;
-  body: string;
-  type: 'checkin' | 'focus' | 'health' | 'family' | 'admin';
-}
-
 interface ProjectContext {
   id: string;
   title: string;
@@ -127,20 +149,25 @@ interface ProjectContext {
   signal: string;
 }
 
-interface CaptureAction {
-  id: string;
-  label: string;
-  description: string;
+interface AssistantReviewCard {
+  projectId: string;
+  projectTitle: string;
+  status: 'active' | 'needs-review' | 'watch' | 'reference';
+  priority: number;
+  title: string;
+  reason: string;
+  suggestedAction: string;
+  evidencePath?: string;
+  evidenceLabel?: string;
+  recentCaptures: number;
+  linkedSources: number;
 }
 
-interface CaptureResult {
-  path: string;
-  routing: {
-    intent: string;
-    projectId?: string;
-    candidates: Array<{ id: string; title: string; score: number }>;
-    actions: CaptureAction[];
-  };
+interface AssistantReview {
+  updatedAt: string;
+  windowDays: number;
+  source: string;
+  cards: AssistantReviewCard[];
 }
 
 function formatDashboardDate(dateValue?: string | null) {
@@ -196,39 +223,6 @@ function formatRelativeDay(dateValue: string, todayValue: string) {
   return `In ${diff} days`;
 }
 
-const baselineTimeline: TimelineBlock[] = [
-  {
-    time: 'Morning',
-    title: 'Check in',
-    body: 'Energy, sleep, body, mood, main constraint.',
-    type: 'checkin',
-  },
-  {
-    time: 'First block',
-    title: 'Product focus',
-    body: 'One dashboard/vault task, small enough to finish.',
-    type: 'focus',
-  },
-  {
-    time: 'Midday',
-    title: 'Food / movement',
-    body: 'Protein, hydration, walk or training baseline.',
-    type: 'health',
-  },
-  {
-    time: 'Afternoon',
-    title: 'Family / life buffer',
-    body: 'Keep life context visible before adding more work.',
-    type: 'family',
-  },
-  {
-    time: 'End',
-    title: 'Close loops',
-    body: 'Capture what changed, update vault, stop cleanly.',
-    type: 'admin',
-  },
-];
-
 const projectContexts: ProjectContext[] = [
   {
     id: 'health',
@@ -280,20 +274,53 @@ const projectContexts: ProjectContext[] = [
   },
 ];
 
-const typeColor: Record<TimelineBlock['type'], string> = {
-  checkin: 'border-blue-400 bg-blue-500/10 text-blue-300',
-  focus: 'border-emerald-400 bg-emerald-500/10 text-emerald-300',
-  health: 'border-amber-400 bg-amber-500/10 text-amber-300',
-  family: 'border-rose-400 bg-rose-500/10 text-rose-300',
-  admin: 'border-slate-400 bg-slate-500/10 text-slate-300',
-};
-
 const areaIcon: Record<PlannerTask['area'], React.ReactNode> = {
   Product: <Target className="h-4 w-4 text-emerald-400" />,
   Health: <Dumbbell className="h-4 w-4 text-amber-400" />,
   Family: <Users className="h-4 w-4 text-rose-400" />,
   Admin: <Folder className="h-4 w-4 text-slate-400" />,
+  AI: <Sparkles className="h-4 w-4 text-blue-500" />,
+  Business: <BriefcaseBusiness className="h-4 w-4 text-emerald-500" />,
+  Wealth: <TrendingUp className="h-4 w-4 text-violet-500" />,
+  Routine: <Activity className="h-4 w-4 text-cyan-500" />,
 };
+
+const reviewStatusLabel: Record<AssistantReviewCard['status'], string> = {
+  active: 'active',
+  'needs-review': 'review',
+  watch: 'watch',
+  reference: 'reference',
+};
+
+const agendaRowClass: Record<PlannerTask['status'], string> = {
+  done: 'border-l-4 border-l-emerald-500 bg-emerald-50',
+  planned: 'border-l-4 border-l-blue-500 bg-blue-50',
+  suggested: 'border-l-4 border-l-amber-500 bg-amber-50',
+  review: 'border-l-4 border-l-violet-500 bg-violet-50',
+};
+
+const agendaStatusClass: Record<PlannerTask['status'], string> = {
+  done: 'border-emerald-200 bg-emerald-100 text-emerald-800',
+  planned: 'border-blue-200 bg-blue-100 text-blue-800',
+  suggested: 'border-amber-200 bg-amber-100 text-amber-800',
+  review: 'border-violet-200 bg-violet-100 text-violet-800',
+};
+
+function iconForProject(projectId: string) {
+  if (projectId === 'health') return <HeartPulse className="h-4 w-4" />;
+  if (projectId === 'business') return <BriefcaseBusiness className="h-4 w-4" />;
+  if (projectId === 'ai') return <Sparkles className="h-4 w-4" />;
+  if (projectId === 'family') return <Users className="h-4 w-4" />;
+  if (projectId === 'wealth') return <TrendingUp className="h-4 w-4" />;
+  if (projectId === 'routine') return <Activity className="h-4 w-4" />;
+  return <Folder className="h-4 w-4" />;
+}
+
+function projectHref(projectId?: string) {
+  if (!projectId) return undefined;
+  if (projectId === 'health') return '/?view=health';
+  return `/?view=project&project=${encodeURIComponent(projectId)}`;
+}
 
 export default function TodayView() {
   const [planner, setPlanner] = useState<PlannerProjection | null>(null);
@@ -301,13 +328,10 @@ export default function TodayView() {
   const [health, setHealth] = useState<HealthToday | null>(null);
   const [healthPlan, setHealthPlan] = useState<RehabPlan | null>(null);
   const [publishingPlan, setPublishingPlan] = useState<PublishingPlan | null>(null);
+  const [assistantReview, setAssistantReview] = useState<AssistantReview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [captureText, setCaptureText] = useState('');
-  const [captureStatus, setCaptureStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null);
-  const [captureActionStatus, setCaptureActionStatus] = useState<string | null>(null);
   const [projectCreateStatus, setProjectCreateStatus] = useState<'idle' | 'saving' | 'error'>('idle');
-  const [selectedDate] = useState<string>(() => getInitialSelectedDate());
+  const [selectedDate, setSelectedDate] = useState<string>(() => getInitialSelectedDate());
 
   useEffect(() => {
     let cancelled = false;
@@ -317,12 +341,13 @@ export default function TodayView() {
       const fetchOptions: RequestInit = { cache: 'no-store' };
       const cacheBust = `t=${Date.now()}`;
 
-      const [plannerData, resumeData, healthData, healthPlanData, publishingPlanData] = await Promise.all([
+      const [plannerData, resumeData, healthData, healthPlanData, publishingPlanData, assistantReviewData] = await Promise.all([
         fetch(`/api/planner?${cacheBust}`, fetchOptions).then((res) => res.json()),
         fetch(`/api/resume?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
         fetch(`/api/health/today?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
         fetch(`/api/health/project?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
         fetch(`/api/projects/ai-publishing?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
+        fetch(`/api/assistant/review?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
       ]);
 
       if (!cancelled) {
@@ -331,6 +356,7 @@ export default function TodayView() {
         setHealth(healthData);
         setHealthPlan(healthPlanData);
         setPublishingPlan(publishingPlanData);
+        setAssistantReview(assistantReviewData);
         setLoading(false);
       }
     };
@@ -345,28 +371,52 @@ export default function TodayView() {
     const refreshOnVisible = () => {
       if (document.visibilityState === 'visible') refreshOnFocus();
     };
+    const refreshOnProjectionChange = () => {
+      loadToday(false).catch(() => {});
+    };
     const interval = window.setInterval(refreshOnFocus, 5 * 60 * 1000);
 
     window.addEventListener('focus', refreshOnFocus);
+    window.addEventListener('planner-projection-changed', refreshOnProjectionChange);
     document.addEventListener('visibilitychange', refreshOnVisible);
 
     return () => {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener('focus', refreshOnFocus);
+      window.removeEventListener('planner-projection-changed', refreshOnProjectionChange);
       document.removeEventListener('visibilitychange', refreshOnVisible);
     };
   }, []);
 
-  const plannedTasks = useMemo(() => planner?.tasks ?? [], [planner]);
-  const primaryTask = plannedTasks[0];
+  useEffect(() => {
+    const syncDateFromUrl = () => setSelectedDate(getInitialSelectedDate());
+    window.addEventListener('popstate', syncDateFromUrl);
+    return () => window.removeEventListener('popstate', syncDateFromUrl);
+  }, []);
+
+  const plannedTasks = useMemo(() => {
+    const tasks = planner?.tasks ?? [];
+    const exact = tasks.filter((task) => task.date === selectedDate);
+    if (exact.length > 0) return exact.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    return tasks
+      .filter((task) => !task.date && task.horizon !== 'this-week')
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  }, [planner, selectedDate]);
+  const reviewTasks = useMemo(
+    () => (planner?.tasks ?? [])
+      .filter((task) => task.horizon === 'this-week' || task.status === 'review')
+      .filter((task) => task.date !== selectedDate)
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+      .slice(0, 4),
+    [planner, selectedDate]
+  );
   const todayDate = healthPlan?.todayDate ?? publishingPlan?.todayDate ?? getSydneyDate();
   const healthDay = healthPlan?.days?.find((day) => day.date === selectedDate) ?? null;
   const healthLink = healthDay ? `/?view=health&day=${healthDay.day}` : '/?view=health';
   const publishingDay =
     publishingPlan?.days?.find((day) => day.date === selectedDate) ??
     (selectedDate === todayDate ? publishingPlan?.upcoming ?? null : null);
-  const publishingIsToday = Boolean(publishingDay && selectedDate === todayDate);
   const publishingLink = '/?view=project&project=ai';
   const dashboardDate = useMemo(
     () => formatDashboardDate(selectedDate),
@@ -390,69 +440,14 @@ export default function TodayView() {
   const relativeDayLabel = formatRelativeDay(selectedDate, todayDate);
   const dateNavButtonClass =
     'inline-flex h-7 min-w-[68px] items-center justify-center gap-1 rounded border border-border bg-surface px-2 text-xs font-medium text-on-surface-variant hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
-  const dateHref = (dateValue: string) => {
-    if (typeof window === 'undefined') return `/?date=${dateValue}`;
+  const navigateDate = (dateValue: string) => {
+    setSelectedDate(dateValue);
+    if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
     url.searchParams.delete('view');
     url.searchParams.set('date', dateValue);
-    return `${url.pathname}${url.search}${url.hash}`;
+    window.history.pushState(null, '', url.toString());
   };
-  const dayTimeline = useMemo(() => {
-    let blocks = baselineTimeline;
-    if (publishingDay) {
-      blocks = blocks.map((block) => (
-        block.type === 'focus'
-          ? {
-              ...block,
-              title: `${publishingIsToday ? 'AI publishing' : relativeDayLabel}: ${publishingDay.title}`,
-              body: publishingDay.plan,
-            }
-          : block
-      ));
-    }
-    if (!healthDay) return blocks;
-    return blocks.map((block) => (
-      block.type === 'health'
-        ? {
-            ...block,
-            title: `Health: ${healthDay.title}`,
-            body: healthDay.plan,
-          }
-        : block
-    ));
-  }, [healthDay, publishingDay, publishingIsToday, relativeDayLabel]);
-
-  const saveCapture = async () => {
-    const input = captureText.trim();
-    if (!input) return;
-
-    setCaptureStatus('saving');
-    try {
-      const res = await fetch('/api/capture', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input,
-          source: 'manual',
-          metadata: { surface: 'today-check-in' },
-        }),
-      });
-
-      if (!res.ok) throw new Error('Capture failed');
-      const data = await res.json();
-      setCaptureText('');
-      setCaptureResult(data);
-      setCaptureStatus('saved');
-    } catch {
-      setCaptureStatus('error');
-    }
-  };
-
-  const applyCheckInPreset = (text: string) => {
-    setCaptureText(text);
-    if (captureStatus !== 'idle') setCaptureStatus('idle');
-  };
-
   const createProject = async () => {
     const title = window.prompt('New project name');
     if (!title?.trim()) return;
@@ -478,28 +473,6 @@ export default function TodayView() {
     }
   };
 
-  const applyCaptureAction = async (action: CaptureAction) => {
-    if (!captureResult) return;
-    setCaptureActionStatus(`Applying ${action.label}...`);
-    try {
-      const response = await fetch('/api/capture/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path: captureResult.path,
-          actionId: action.id,
-          projectId: captureResult.routing.projectId,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok || data.error) throw new Error(data.error || 'Action failed');
-      setCaptureActionStatus(`${action.label} saved as pending.`);
-      window.setTimeout(() => setCaptureActionStatus(null), 2500);
-    } catch {
-      setCaptureActionStatus('Action failed.');
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-on-surface-variant">
@@ -509,292 +482,137 @@ export default function TodayView() {
   }
 
   return (
-    <div className="flex w-auto max-w-full min-w-0 flex-col gap-4 overflow-hidden pb-8 xl:w-full xl:max-w-[1440px]">
-      <div className="grid w-full max-w-full min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <section className="w-full max-w-full min-w-0 rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-4 flex flex-col gap-3">
-            <div className="min-w-0">
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-primary">
-                <CalendarDays className="h-5 w-5" />
-                <span className="text-xs font-semibold uppercase tracking-wide">{relativeDayLabel}</span>
-                <span className="rounded border border-primary/20 bg-active px-2 py-0.5 text-xs font-medium text-primary">
-                  {dashboardDate}
-                </span>
-                <div className="ml-0 flex flex-wrap items-center gap-1.5 sm:ml-2">
-                  <a
-                    href={dateHref(addDays(selectedDate, -1))}
-                    aria-disabled={!canGoPrevious}
-                    className={`${dateNavButtonClass} ${!canGoPrevious ? 'pointer-events-none opacity-40' : ''}`}
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                    Prev
-                  </a>
-                  <a
-                    href={dateHref(todayDate)}
-                    aria-disabled={selectedDate === todayDate}
-                    className={`${dateNavButtonClass} ${selectedDate === todayDate ? 'pointer-events-none opacity-40' : ''}`}
-                  >
-                    Today
-                  </a>
-                  <a
-                    href={dateHref(addDays(selectedDate, 1))}
-                    aria-disabled={!canGoNext}
-                    className={`${dateNavButtonClass} ${!canGoNext ? 'pointer-events-none opacity-40' : ''}`}
-                  >
-                    Next
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </a>
+    <div className="flex w-full max-w-none min-w-0 flex-col gap-4 overflow-hidden pb-8">
+      <div className="grid w-full max-w-full min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="flex w-full max-w-full min-w-0 flex-col gap-4">
+          <section className="w-full max-w-full min-w-0 rounded-lg border border-border bg-surface p-4 shadow-sm">
+            <div className="mb-4 flex flex-col gap-3">
+              <div className="min-w-0">
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-primary">
+                  <CalendarDays className="h-5 w-5" />
+                  <span className="text-xs font-semibold uppercase tracking-wide">{relativeDayLabel}</span>
+                  <span className="rounded border border-primary/20 bg-active px-2 py-0.5 text-xs font-medium text-primary">
+                    {dashboardDate}
+                  </span>
+                  <div className="ml-0 flex flex-wrap items-center gap-1.5 sm:ml-2">
+                    <button
+                      type="button"
+                      onClick={() => navigateDate(addDays(selectedDate, -1))}
+                      disabled={!canGoPrevious}
+                      className={dateNavButtonClass}
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigateDate(todayDate)}
+                      disabled={selectedDate === todayDate}
+                      className={dateNavButtonClass}
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigateDate(addDays(selectedDate, 1))}
+                      disabled={!canGoNext}
+                      className={dateNavButtonClass}
+                    >
+                      Next
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
+                <h2 className="text-xl font-semibold text-on-surface">Today console</h2>
+                <p className="text-sm text-on-surface-variant">What changed, what is planned, and what needs a decision.</p>
               </div>
-              <h2 className="text-xl font-semibold text-on-surface">Day map</h2>
-              <p className="text-sm text-on-surface-variant">Use the plan unless your state changed.</p>
             </div>
-          </div>
 
-          <div className="space-y-3">
-            {dayTimeline.map((block) => (
-              <div key={`${block.time}-${block.title}`} className="grid min-w-0 grid-cols-1 gap-1.5 sm:grid-cols-[88px_minmax(0,1fr)] sm:gap-3">
-                <div className="text-xs font-medium text-on-surface-variant sm:pt-3">{block.time}</div>
-                <div className={`min-w-0 rounded-lg border p-3 ${typeColor[block.type]}`}>
-                  <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <h4 className="text-sm font-semibold text-on-surface">{block.title}</h4>
-                      <p className="mt-1 text-sm text-on-surface-variant">{block.body}</p>
-                    </div>
-                    {block.type === 'focus' && publishingDay ? (
-                      <a
-                        href={publishingLink}
-                        className="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
-                      >
-                        Open
-                        <ArrowRight className="h-3 w-3" />
-                      </a>
-                    ) : block.type === 'health' && healthDay ? (
-                      <a
-                        href={healthLink}
-                        className="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
-                      >
-                        Open
-                        <ArrowRight className="h-3 w-3" />
-                      </a>
-                    ) : (
-                      <Circle className="mt-0.5 h-4 w-4 text-on-surface-variant" />
-                    )}
-                  </div>
-                </div>
+            <div className="mb-4 rounded-lg border border-border bg-surface-variant p-3">
+              <div className="mb-3 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                <h3 className="text-base font-semibold text-on-surface">{relativeDayLabel} agenda</h3>
               </div>
-            ))}
-          </div>
-        </section>
-
-        <aside className="min-w-0 flex flex-col gap-4">
-          <section className="rounded-lg border border-border bg-surface p-3 shadow-sm">
-            <details>
-              <summary className="cursor-pointer list-none">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <MessageSquareText className="h-4 w-4 text-primary" />
-                    <div>
-                      <h3 className="text-sm font-semibold text-on-surface">Optional check-in</h3>
-                      <p className="text-xs text-on-surface-variant">Use only if the day needs replanning.</p>
-                    </div>
-                  </div>
-                  <span className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant">
-                    adjust
-                  </span>
-                </div>
-              </summary>
-              <div className="mt-3">
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  <button
-                    onClick={() => applyCheckInPreset('Move today one day forward. I am not in the right state to execute this plan today.')}
-                    className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant hover:bg-hover"
-                  >
-                    Move today +1
-                  </button>
-                  <button
-                    onClick={() => applyCheckInPreset('Move this week forward. I need a recovery/reset period before continuing the current plan.')}
-                    className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant hover:bg-hover"
-                  >
-                    Move week
-                  </button>
-                  <button
-                    onClick={() => applyCheckInPreset('Rest day. Keep only health minimums and capture what changed.')}
-                    className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant hover:bg-hover"
-                  >
-                    Rest day
-                  </button>
-                </div>
-                <textarea
-                  value={captureText}
-                  onChange={(event) => {
-                    setCaptureText(event.target.value);
-                    if (captureStatus !== 'idle') setCaptureStatus('idle');
-                    if (captureResult) setCaptureResult(null);
-                  }}
-                  rows={3}
-                  placeholder="What changed? Energy, sleep, body, mood, main constraint..."
-                  className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface outline-none placeholder:text-on-surface-variant/60 focus:border-primary"
-                />
-                <div className="mt-2 flex items-center justify-between gap-3">
-                  <span className="text-xs text-on-surface-variant">
-                    {captureStatus === 'saved' && `Saved to ${captureResult?.path || 'vault'}.`}
-                    {captureStatus === 'error' && 'Save failed.'}
-                  </span>
-                  <button
-                    onClick={saveCapture}
-                    disabled={!captureText.trim() || captureStatus === 'saving'}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  >
-                    {captureStatus === 'saving' ? 'Saving...' : 'Save'}
-                  </button>
-                </div>
-                {captureResult && (
-                  <div className="mt-3 rounded-lg border border-border bg-surface-variant p-3">
-                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-on-surface-variant">
-                      <span>Intent: {captureResult.routing.intent}</span>
-                      <span>/</span>
-                      <span>Project: {captureResult.routing.projectId || 'inbox'}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {captureResult.routing.actions.map((action) => (
-                        <button
-                          key={action.id}
-                          onClick={() => applyCaptureAction(action)}
-                          title={action.description}
-                          className="rounded border border-border bg-surface px-2 py-1 text-xs text-on-surface-variant hover:bg-hover"
-                        >
-                          {action.label}
-                        </button>
-                      ))}
-                    </div>
-                    {captureActionStatus && (
-                      <p className="mt-2 text-xs text-on-surface-variant">{captureActionStatus}</p>
-                    )}
-                  </div>
+              <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+                {plannedTasks.map((task) => {
+                  const href = projectHref(task.projectId);
+                  return (
+                    <article key={task.id} className={`grid gap-3 p-3 sm:grid-cols-[112px_minmax(0,1fr)] ${agendaRowClass[task.status]}`}>
+                      <div className="flex items-center gap-2 text-xs font-medium text-on-surface-variant sm:block">
+                        <div className="flex items-center gap-2 sm:mb-1">
+                          {areaIcon[task.area]}
+                          <span>{task.area}</span>
+                        </div>
+                        <span className={`rounded border px-2 py-0.5 text-xs font-medium ${agendaStatusClass[task.status]}`}>
+                          {task.status}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        {href ? (
+                          <a href={href} className="text-sm font-semibold leading-snug text-on-surface hover:text-primary hover:underline">
+                            {task.title}
+                          </a>
+                        ) : (
+                          <p className="text-sm font-semibold leading-snug text-on-surface">{task.title}</p>
+                        )}
+                        {task.detail ? (
+                          <p className="mt-1 text-sm leading-relaxed text-on-surface-variant">{task.detail}</p>
+                        ) : null}
+                        <p className="mt-2 truncate text-xs text-on-surface-variant">{task.source}</p>
+                      </div>
+                    </article>
+                  );
+                })}
+                {plannedTasks.length === 0 && (
+                  <p className="p-3 text-sm text-on-surface-variant">No dated tasks selected for this day yet.</p>
                 )}
               </div>
-            </details>
-          </section>
-
-          {publishingDay && (
-            <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-              <div className="mb-3 flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" />
-                <div>
-                  <h3 className="text-base font-semibold text-on-surface">
-                    {publishingIsToday ? 'AI publishing today' : `AI publishing ${relativeDayLabel.toLowerCase()}`}
-                  </h3>
-                  <p className="text-xs text-on-surface-variant">{publishingPlan?.title}</p>
-                </div>
-              </div>
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-                <div className="mb-2 flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-on-surface">
-                      Day {publishingDay.day}: {publishingDay.title}
-                    </p>
-                    <p className="mt-1 text-sm text-on-surface-variant">{publishingDay.plan}</p>
-                  </div>
-                  <a
-                    href={publishingLink}
-                    className="inline-flex shrink-0 items-center gap-1 rounded border border-blue-200 bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
-                  >
-                    Open
-                    <ArrowRight className="h-3 w-3" />
-                  </a>
-                </div>
-                <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-on-surface-variant">Output</p>
-                <p className="mt-1 text-sm text-on-surface-variant">{publishingDay.output}</p>
-              </div>
-            </section>
-          )}
-
-          {health && (
-            <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-              <div className="mb-3 flex items-center gap-2">
-                <HeartPulse className="h-4 w-4 text-amber-500" />
-                <div>
-                  <h3 className="text-base font-semibold text-on-surface">Health commitment</h3>
-                  <p className="text-xs text-on-surface-variant">{health.activeProject.title} / {health.activeProject.status}</p>
-                </div>
-              </div>
-              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
-                <div className="mb-2 flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-on-surface">
-                      {healthDay ? `Day ${healthDay.day}: ${healthDay.title}` : health.today.primaryAction}
-                    </p>
-                    {healthDay && (
-                      <p className="mt-1 text-sm text-on-surface-variant">{healthDay.plan}</p>
-                    )}
-                  </div>
-                  <a
-                    href={healthLink}
-                    className="inline-flex shrink-0 items-center gap-1 rounded border border-amber-200 bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
-                  >
-                    Open
-                    <ArrowRight className="h-3 w-3" />
-                  </a>
-                </div>
-                <ul className="mt-2 space-y-1">
-                  {(healthDay?.actual?.completed?.length
-                    ? healthDay.actual.completed.map((item) => `${item.code}: ${formatActualExercise(item)}`)
-                    : healthDay ? healthDay.plan.split(';').map((item) => item.trim()).filter(Boolean) : health.today.details
-                  ).slice(0, 5).map((item) => (
-                    <li key={item} className="flex gap-2 text-sm text-on-surface-variant">
-                      <span className={`mt-2 h-1.5 w-1.5 rounded-full ${healthDay?.actual?.completed?.length ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-                {healthDay?.actual?.remaining?.length ? (
-                  <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                    Still open: {healthDay.actual.remaining.join('; ')}
-                  </p>
-                ) : healthDay?.completed ? (
-                  <p className="mt-3 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
-                    Completed {relativeDayLabel.toLowerCase()}
-                  </p>
-                ) : null}
-              </div>
-              <div className="mt-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-                  Avoid {relativeDayLabel.toLowerCase()}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {health.today.avoid.slice(0, 6).map((item) => (
-                    <span key={item} className="rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant">
-                      {item}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <p className="mt-3 text-xs leading-relaxed text-on-surface-variant">{health.today.progressionRule}</p>
-            </section>
-          )}
-
-          <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              <h3 className="text-base font-semibold text-on-surface">Today / week tasks</h3>
             </div>
-            <div className="space-y-2">
-              {plannedTasks.map((task) => (
-                <article key={task.id} className="rounded-lg border border-border bg-surface-variant p-3">
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5">{areaIcon[task.area]}</div>
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-1 flex items-center gap-2 text-xs text-on-surface-variant">
-                        <span>{task.area}</span>
-                        <span>/</span>
-                        <span>{task.status}</span>
+
+            <div className="grid gap-3">
+              {healthDay && (
+                <article className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="mb-1 flex items-center gap-2 text-amber-700">
+                        <Dumbbell className="h-4 w-4" />
+                        <span className="text-xs font-semibold uppercase tracking-wide">Health plan</span>
                       </div>
-                      <p className="text-sm font-medium leading-snug text-on-surface">{task.title}</p>
+                      <h3 className="text-base font-semibold text-on-surface">{healthDay.title}</h3>
+                      <p className="mt-1 text-sm text-on-surface-variant">{healthDay.plan}</p>
                     </div>
+                    <a
+                      href={healthLink}
+                      className="inline-flex shrink-0 items-center gap-1 rounded border border-amber-200 bg-white px-3 py-2 text-sm font-medium text-primary hover:bg-active"
+                    >
+                      Open
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </a>
                   </div>
                 </article>
-              ))}
+              )}
+
+              {publishingDay && (
+                <article className="rounded-lg border border-blue-300 bg-blue-50 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="mb-1 flex items-center gap-2 text-blue-700">
+                        <Sparkles className="h-4 w-4" />
+                        <span className="text-xs font-semibold uppercase tracking-wide">AI / product</span>
+                      </div>
+                      <h3 className="text-base font-semibold text-on-surface">{publishingDay.title}</h3>
+                      <p className="mt-1 text-sm text-on-surface-variant">{publishingDay.plan}</p>
+                    </div>
+                    <a
+                      href={publishingLink}
+                      className="inline-flex shrink-0 items-center gap-1 rounded border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-primary hover:bg-active"
+                    >
+                      Open
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </a>
+                  </div>
+                </article>
+              )}
             </div>
           </section>
 
@@ -803,6 +621,97 @@ export default function TodayView() {
             <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
               {resume?.dailyBrief?.changedSinceYesterday ?? 'Recent vault changes will be summarized here.'}
             </p>
+          </section>
+        </div>
+
+        <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start">
+          <section className="rounded-lg border border-border bg-surface p-4 shadow-sm xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="mb-1 flex items-center gap-2 text-primary">
+                  <Sparkles className="h-4 w-4" />
+                  <span className="text-xs font-semibold uppercase tracking-wide">Assistant actions</span>
+                </div>
+                <h3 className="text-base font-semibold text-on-surface">Proposed next moves</h3>
+                <p className="text-sm leading-relaxed text-on-surface-variant">
+                  Suggested from vault scan. Nothing is applied automatically.
+                </p>
+              </div>
+              <span className="shrink-0 rounded border border-border bg-surface-variant px-2 py-1 text-xs text-on-surface-variant">
+                {assistantReview?.windowDays ?? 30}d
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {reviewTasks.map((task) => {
+                const href = projectHref(task.projectId);
+                return (
+                  <article key={task.id} className="rounded-lg border border-border bg-surface-variant p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-on-surface-variant">
+                        {areaIcon[task.area]}
+                        <span className="truncate">{task.area}</span>
+                      </div>
+                      <span className={`shrink-0 rounded border px-2 py-0.5 text-xs font-medium ${agendaStatusClass[task.status]}`}>
+                        {task.status}
+                      </span>
+                    </div>
+                    {href ? (
+                      <a href={href} className="text-sm font-semibold leading-snug text-on-surface hover:text-primary hover:underline">
+                        {task.title}
+                      </a>
+                    ) : (
+                      <p className="text-sm font-semibold leading-snug text-on-surface">{task.title}</p>
+                    )}
+                    {task.detail ? <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">{task.detail}</p> : null}
+                  </article>
+                );
+              })}
+
+              {(assistantReview?.cards ?? []).map((card) => (
+                <article key={card.projectId} className="rounded-lg border border-border bg-surface-variant p-3">
+                  <div className="mb-2 flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="text-primary">{iconForProject(card.projectId)}</span>
+                      <div className="min-w-0">
+                        <h4 className="truncate text-sm font-semibold text-on-surface">{card.projectTitle}</h4>
+                        <p className="text-xs text-on-surface-variant">
+                          {card.recentCaptures} capture(s) / {card.linkedSources} source(s)
+                        </p>
+                      </div>
+                    </div>
+                    <span className="shrink-0 rounded border border-border bg-surface px-2 py-0.5 text-xs text-on-surface-variant">
+                      {reviewStatusLabel[card.status]}
+                    </span>
+                  </div>
+                  <p className="text-sm font-medium leading-snug text-on-surface">{card.suggestedAction}</p>
+                  <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-on-surface-variant">{card.reason}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <a
+                      href={projectHref(card.projectId) ?? '/?view=today'}
+                      className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
+                    >
+                      Open project
+                      <ArrowRight className="h-3 w-3" />
+                    </a>
+                    {card.evidencePath ? (
+                      <a
+                        href={`/?view=vault&path=${encodeURIComponent(card.evidencePath)}`}
+                        className="inline-flex max-w-full items-center gap-1 text-xs font-medium text-on-surface-variant hover:text-primary hover:underline"
+                      >
+                        <span className="truncate">{card.evidenceLabel || 'Evidence'}</span>
+                      </a>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+
+              {reviewTasks.length === 0 && (assistantReview?.cards ?? []).length === 0 ? (
+                <p className="rounded-lg border border-border bg-surface-variant p-3 text-sm text-on-surface-variant">
+                  No assistant actions are waiting.
+                </p>
+              ) : null}
+            </div>
           </section>
         </aside>
       </div>
@@ -844,12 +753,4 @@ export default function TodayView() {
       </section>
     </div>
   );
-}
-
-function formatActualExercise(item: { load: string | null; sets: number | null; reps: number | null }) {
-  const parts = [];
-  if (item.load) parts.push(item.load);
-  if (item.sets) parts.push(`${item.sets} sets`);
-  if (item.reps) parts.push(`${item.reps} reps`);
-  return parts.length ? parts.join(' / ') : 'done';
 }

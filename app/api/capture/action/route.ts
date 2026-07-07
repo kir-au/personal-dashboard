@@ -7,17 +7,27 @@ const SHOULDER_REHAB_PLAN_PATH = path.join(VAULT_ROOT, 'structured', 'health', '
 const SHOULDER_REHAB_LOG_PATH = path.join(VAULT_ROOT, 'structured', 'health', 'shoulder-rehab-log.json');
 const HEALTH_STATE_PATH = path.join(VAULT_ROOT, 'structured', 'health', 'health-state.json');
 
+type CompletedActivity = {
+  code: string;
+  name: string;
+  load: string | null;
+  sets: number | null;
+  reps: number | null;
+};
+
 type CaptureActionId =
   | 'leave-in-inbox'
   | 'link-to-project'
   | 'add-today-achievement'
   | 'add-to-today-plan'
-  | 'log-health-workout';
+  | 'apply-structured-update';
 
 interface CaptureActionRequest {
   path: string;
   actionId: CaptureActionId;
   projectId?: string;
+  processorId?: string;
+  recordType?: string;
   note?: string;
 }
 
@@ -67,13 +77,20 @@ function exerciseName(code: string) {
     SCR: 'Seated Cable Row',
     GFP: 'Cable Face Pull',
     C: 'Suitcase / Farmer Carry',
+    P: 'Pendulum',
+    W: 'Wall Slides',
+    KAW: 'Kettlebell Around-the-Waist Pass',
+    BP: 'Chest Bench Press',
+    KBS: 'Russian Kettlebell Swings',
+    cycling: 'Cycling',
+    bike: 'Bike',
   };
   return names[code] || code;
 }
 
 function parseWorkout(markdown: string) {
   const body = textBodyFromMarkdown(markdown);
-  const completed: Array<{ code: string; name: string; load: string | null; sets: number | null; reps: number | null }> = [];
+  const completed: CompletedActivity[] = [];
 
   const csr = body.match(/\bCSR\b.*?(\d+)\s*sets?.*?(\d+)\s*kg.*?(\d+)\s*reps?/i);
   if (csr) {
@@ -133,21 +150,99 @@ function parseWorkout(markdown: string) {
     });
   }
 
+  const pendulum = body.match(/(?:\bP\b|pendulum).*?(\d+)\s*min/i);
+  if (pendulum) {
+    completed.push({
+      code: 'P',
+      name: exerciseName('P'),
+      load: null,
+      sets: null,
+      reps: null,
+    });
+  }
+
+  const wall = body.match(/(?:\bW\b|wall(?:\s+slides?| exercises?)?).*?(\d+)\s*[x×]\s*(\d+)/i);
+  if (wall) {
+    completed.push({
+      code: 'W',
+      name: exerciseName('W'),
+      load: null,
+      sets: Number(wall[1]),
+      reps: Number(wall[2]),
+    });
+  }
+
+  const kaw = body.match(/(?:\bKAW\b|kettlebell around(?: |-)?the(?: |-)?waist|around(?: |-)?the(?: |-)?waist).*?(\d+)\s*(?:easy\s*)?(?:sets?|times?|раза|раз)?/i);
+  if (kaw) {
+    completed.push({
+      code: 'KAW',
+      name: exerciseName('KAW'),
+      load: null,
+      sets: Number(kaw[1]),
+      reps: null,
+    });
+  }
+
+  const kettlebellSwings =
+    body.match(/(\d+)\s*(?:russian\s+)?kettlebell\s+swings?\b/i)
+    || body.match(/(?:russian\s+)?kettlebell\s+swings?\b.*?(\d+)\s*(?:reps?|повтор)/i);
+  if (kettlebellSwings) {
+    completed.push({
+      code: 'KBS',
+      name: exerciseName('KBS'),
+      load: null,
+      sets: null,
+      reps: Number(kettlebellSwings[1]),
+    });
+  }
+
+  const cycling =
+    body.match(/(\d+)\s*(?:minutes?|mins?|мин(?:ут)?\.?)\s*(?:of\s+)?(?:cycling|bike|biking|велосипед|сайкл)/i)
+    || body.match(/(?:cycling|bike|biking|велосипед|сайкл).*?(\d+)\s*(?:minutes?|mins?|мин(?:ут)?\.?)/i);
+  if (cycling) {
+    completed.push({
+      code: 'cycling',
+      name: exerciseName('cycling'),
+      load: `${cycling[1]} min`,
+      sets: null,
+      reps: null,
+    });
+  }
+
+  if (/bench/i.test(body)) {
+    const benchBlocks = Array.from(body.matchAll(/(\d+)\s*sets?\s*[x×]\s*(\d+)\s*kg/gi));
+    for (const bench of benchBlocks) {
+      completed.push({
+        code: 'BP',
+        name: exerciseName('BP'),
+        load: `${bench[2]} kg`,
+        sets: Number(bench[1]),
+        reps: null,
+      });
+    }
+  }
+
   return { reportedText: body, completed };
 }
 
 function mergeCompleted(
-  existing: Array<{ code: string; name: string; load: string | null; sets: number | null; reps: number | null }> = [],
-  incoming: Array<{ code: string; name: string; load: string | null; sets: number | null; reps: number | null }>
+  existing: CompletedActivity[] = [],
+  incoming: CompletedActivity[]
 ) {
-  const byCode = new Map(existing.map((item) => [item.code, item]));
+  const mergeKey = (item: CompletedActivity) => {
+    const load = item.load ? `:${item.load}` : '';
+    const reps = item.reps ? `:${item.reps}reps` : '';
+    const sets = item.sets ? `:${item.sets}sets` : '';
+    return `${item.code}${load}${sets}${reps}`;
+  };
+  const byCode = new Map(existing.map((item) => [mergeKey(item), item]));
   for (const item of incoming) {
-    byCode.set(item.code, item);
+    byCode.set(mergeKey(item), item);
   }
   return Array.from(byCode.values());
 }
 
-async function applyHealthWorkout(capturePath: { relative: string; full: string }, appliedAt: string) {
+async function applyHealthActivityUpdate(capturePath: { relative: string; full: string }, appliedAt: string) {
   const markdown = await fs.readFile(capturePath.full, 'utf-8');
   const parsed = parseWorkout(markdown);
   if (!parsed.completed.length) {
@@ -172,14 +267,25 @@ async function applyHealthWorkout(capturePath: { relative: string; full: string 
   const existingActual = day.actual || {};
   const completed = mergeCompleted(existingActual.completed || [], parsed.completed);
   const completedCodes = new Set(completed.map((item) => item.code));
-  const plannedRemaining = ['CSR', 'SCR', 'GFP', 'C', 'walk']
+  const plannedCodes: string[] = Array.from(new Set((day.plan.match(/\b(?:CSR|SCR|GFP|FP|C|walk|P|W|KAW|ER|IR|RF|LP|SAR|KBR)\b/gi) || [])
+    .map((code: string) => {
+      const normalized = code.toUpperCase();
+      if (normalized === 'FP') return 'GFP';
+      if (normalized === 'WALK') return 'walk';
+      return normalized;
+    })));
+  const plannedRemaining = plannedCodes
     .filter((code) => !completedCodes.has(code))
     .map((code) => {
       if (code === 'C') return 'C 4x30 sec/side';
       if (code === 'walk') return 'walk 20 min';
       if (code === 'GFP') return 'GFP 3x15';
       if (code === 'CSR') return 'CSR 3x10';
-      return 'SCR 3x10';
+      if (code === 'SCR') return 'SCR 3x10';
+      if (code === 'P') return 'P 2 min';
+      if (code === 'W') return 'W 2x10';
+      if (code === 'KAW') return 'KAW 2 easy sets';
+      return code;
     });
 
   const logEntry = {
@@ -201,8 +307,11 @@ async function applyHealthWorkout(capturePath: { relative: string; full: string 
     },
     notes: [
       'Logged through /api/capture/action.',
-      'SCR reps were not confirmed.',
-      'Face pull sets and reps were not stated.',
+      ...parsed.completed
+        .filter((item) => !plannedCodes.includes(item.code) && item.code !== 'walk')
+        .map((item) => `${item.code} is logged as off-plan activity for this rehab day.`),
+      ...(parsed.completed.some((item) => item.code === 'SCR' && item.reps == null) ? ['SCR reps were not confirmed.'] : []),
+      ...(parsed.completed.some((item) => item.code === 'GFP' && (item.sets == null || item.reps == null)) ? ['Face pull sets and reps were not stated.'] : []),
     ],
   };
 
@@ -249,10 +358,10 @@ async function applyHealthWorkout(capturePath: { relative: string; full: string 
     rawPath: capturePath.relative,
   };
   state.openQuestions = [
-    'Confirm SCR reps for the 40 kg sets.',
-    'Confirm face pull sets and reps at 20 kg.',
-    ...(plannedRemaining.includes('walk 20 min') ? ['Was the walk completed for Day 10?'] : []),
-    'Any pain during the session, night pain, or next-day pain after Day 10?',
+    ...(parsed.completed.some((item) => item.code === 'SCR' && item.reps == null) ? ['Confirm SCR reps.'] : []),
+    ...(parsed.completed.some((item) => item.code === 'GFP' && (item.sets == null || item.reps == null)) ? ['Confirm face pull sets and reps.'] : []),
+    ...(plannedRemaining.some((item) => item.toLowerCase().includes('walk')) ? ['Was the walk completed?'] : []),
+    `Any pain during the session, night pain, or next-day pain after Day ${day.day}?`,
   ];
 
   await Promise.all([
@@ -262,6 +371,31 @@ async function applyHealthWorkout(capturePath: { relative: string; full: string 
   ]);
 
   return { applied: true, planDay: day.day, date: today, completed };
+}
+
+async function applyStructuredUpdate(request: {
+  capturePath: { relative: string; full: string };
+  appliedAt: string;
+  processorId?: string;
+  projectId?: string;
+  recordType?: string;
+}) {
+  if (request.processorId === 'health.activity' || (request.projectId === 'health' && request.recordType === 'activity_log')) {
+    return {
+      processorId: 'health.activity',
+      recordType: 'activity_log',
+      result: await applyHealthActivityUpdate(request.capturePath, request.appliedAt),
+    };
+  }
+
+  return {
+    processorId: request.processorId || null,
+    recordType: request.recordType || null,
+    result: {
+      applied: false,
+      reason: `No structured processor registered for ${request.processorId || request.projectId || 'unknown target'}.`,
+    },
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -281,6 +415,8 @@ export async function POST(request: NextRequest) {
       actionId: body.actionId,
       path: capturePath.relative,
       projectId: projectId || null,
+      processorId: body.processorId || null,
+      recordType: body.recordType || null,
       note: body.note || null,
       status: 'pending',
     };
@@ -302,10 +438,16 @@ export async function POST(request: NextRequest) {
       await appendJsonl('structured/today/plan-overrides.jsonl', baseEntry);
     }
 
-    if (body.actionId === 'log-health-workout') {
-      await appendJsonl('structured/health/pending-workouts.jsonl', baseEntry);
-      const healthResult = await applyHealthWorkout(capturePath, now);
-      return NextResponse.json({ ok: true, action: baseEntry, healthResult });
+    if (body.actionId === 'apply-structured-update') {
+      await appendJsonl('indexes/structured-updates.jsonl', baseEntry);
+      const structuredResult = await applyStructuredUpdate({
+        capturePath,
+        appliedAt: now,
+        processorId: body.processorId,
+        projectId,
+        recordType: body.recordType,
+      });
+      return NextResponse.json({ ok: true, action: baseEntry, structuredResult });
     }
 
     return NextResponse.json({ ok: true, action: baseEntry });

@@ -25,7 +25,21 @@ export async function GET(
     }
 
     const raw = await fs.readFile(insightsPath, 'utf-8');
-    return NextResponse.json(JSON.parse(raw));
+    const insights = JSON.parse(raw);
+
+    if (projectId === 'ai') {
+      try {
+        const backlogRaw = await fs.readFile(path.join(PROJECT_INSIGHTS_ROOT, 'ai-backlog.json'), 'utf-8');
+        return NextResponse.json({
+          ...insights,
+          backlog: JSON.parse(backlogRaw),
+        });
+      } catch {
+        return NextResponse.json(insights);
+      }
+    }
+
+    return NextResponse.json(insights);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const status = message.includes('ENOENT') ? 404 : 500;
