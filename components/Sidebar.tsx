@@ -147,22 +147,22 @@ export default function Sidebar({ currentView, onViewChange, mobileOpen = false,
       },
     },
     {
-      id: 'vault',
-      label: 'Vault',
-      icon: <HardDrive className="w-5 h-5" />,
-      active: currentView === 'browse',
-      onClick: () => {
-        onViewChange('browse');
-        onMobileClose?.();
-      },
-    },
-    {
       id: 'planner',
       label: 'Planner',
       icon: <CalendarDays className="w-5 h-5" />,
       active: currentView === 'planner',
       onClick: () => {
         onViewChange('planner');
+        onMobileClose?.();
+      },
+    },
+    {
+      id: 'vault',
+      label: 'Vault',
+      icon: <HardDrive className="w-5 h-5" />,
+      active: currentView === 'browse',
+      onClick: () => {
+        onViewChange('browse');
         onMobileClose?.();
       },
     },

@@ -111,15 +111,15 @@ async function main() {
         : 'Keep health state current before adding more plans.',
     }),
     task({
-      id: 'today-routine-capture-loop',
+      id: 'today-ai-capture-loop',
       title: 'Use the header capture/voice box as the control input when plans change.',
-      area: 'Routine',
+      area: 'AI',
       status: 'planned',
       source: 'Personal Assistant Rolling Strategy + recent voice capture tests',
       date: today,
       horizon: 'today',
       priority: 80,
-      projectId: 'routine',
+      projectId: 'ai',
       detail: 'Capture raw first; processor decides whether it becomes task, health log, review item, or nothing.',
     }),
     task({

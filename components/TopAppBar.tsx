@@ -41,6 +41,7 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const captureTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [authStatus, setAuthStatus] = useState<{
     enabled: boolean;
     user: { name?: string | null; email?: string | null; image?: string | null } | null;
@@ -85,6 +86,17 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
     window.localStorage.setItem('personal-dashboard-theme', nextTheme);
     setSettingsOpen(false);
   };
+
+  const resizeCaptureTextarea = () => {
+    const textarea = captureTextareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 132)}px`;
+  };
+
+  useEffect(() => {
+    resizeCaptureTextarea();
+  }, [captureText]);
 
   const saveCapture = async () => {
     const input = captureText.trim();
@@ -238,75 +250,78 @@ export default function TopAppBar({ currentView, searchQuery, onSearchQueryChang
           )}
         </div>
 
-        <div className="relative hidden min-w-[360px] md:block" data-capture-loop>
-          <div className="mx-auto flex w-full max-w-5xl items-center gap-2 rounded-lg border border-border bg-surface-variant px-3 py-1.5 focus-within:border-primary focus-within:bg-surface">
-            <MessageSquareText className="h-4 w-4 shrink-0 text-primary" />
-            <input
-              type="text"
-              value={captureText}
-              onChange={(event) => {
-                setCaptureText(event.target.value);
-                setCaptureSource('manual');
-                if (captureStatus !== 'idle') setCaptureStatus('idle');
-                if (lastSavedPath) setLastSavedPath(null);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  saveCapture();
-                }
-              }}
-              placeholder={capturePlaceholder}
-              className="min-w-[240px] flex-1 border-none bg-transparent text-sm text-on-surface outline-none placeholder:text-on-surface-variant/70"
-            />
-            {captureText && (
+        <div className="relative hidden h-10 min-w-[360px] md:block" data-capture-loop>
+          <div className="absolute left-1/2 top-0 z-50 w-full max-w-5xl -translate-x-1/2 rounded-lg border border-border bg-surface-variant px-3 py-1.5 shadow-sm transition-shadow focus-within:border-primary focus-within:bg-surface focus-within:shadow-lg">
+            <div className="flex items-start gap-2">
+              <MessageSquareText className="mt-1.5 h-4 w-4 shrink-0 text-primary" />
+              <textarea
+                ref={captureTextareaRef}
+                rows={1}
+                value={captureText}
+                onChange={(event) => {
+                  setCaptureText(event.target.value);
+                  setCaptureSource('manual');
+                  if (captureStatus !== 'idle') setCaptureStatus('idle');
+                  if (lastSavedPath) setLastSavedPath(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    saveCapture();
+                  }
+                }}
+                placeholder={capturePlaceholder}
+                className="max-h-32 min-h-7 min-w-[240px] flex-1 resize-none overflow-y-auto border-none bg-transparent py-1 text-sm leading-5 text-on-surface outline-none placeholder:text-on-surface-variant/70"
+              />
+              {captureText && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCaptureText('');
+                    setCaptureSource('manual');
+                    setCaptureStatus('idle');
+                    setLastSavedPath(null);
+                  }}
+                  className="mt-1 rounded p-1 hover:bg-hover"
+                  title="Clear"
+                >
+                  <X className="h-3.5 w-3.5 text-on-surface-variant" />
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => {
-                  setCaptureText('');
-                  setCaptureSource('manual');
-                  setCaptureStatus('idle');
-                  setLastSavedPath(null);
-                }}
-                className="rounded p-1 hover:bg-hover"
-                title="Clear"
+                onClick={startRecording}
+                disabled={voiceStatus === 'transcribing'}
+                className={`mt-0.5 inline-flex h-7 shrink-0 items-center gap-1 rounded border px-2.5 text-xs font-medium ${
+                  voiceStatus === 'recording'
+                    ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                    : 'border-border bg-surface text-on-surface-variant hover:bg-hover'
+                } disabled:opacity-40`}
+                title={voiceStatus === 'recording' ? 'Stop recording' : 'Record voice capture'}
               >
-                <X className="h-3.5 w-3.5 text-on-surface-variant" />
+                {voiceStatus === 'recording' ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                {voiceStatus === 'recording' ? 'Stop' : voiceStatus === 'transcribing' ? 'Transcribing' : 'Voice'}
               </button>
-            )}
-            <button
-              type="button"
-              onClick={startRecording}
-              disabled={voiceStatus === 'transcribing'}
-              className={`inline-flex h-7 items-center gap-1 rounded border px-2.5 text-xs font-medium ${
-                voiceStatus === 'recording'
-                  ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-                  : 'border-border bg-surface text-on-surface-variant hover:bg-hover'
-              } disabled:opacity-40`}
-              title={voiceStatus === 'recording' ? 'Stop recording' : 'Record voice capture'}
-            >
-              {voiceStatus === 'recording' ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-              {voiceStatus === 'recording' ? 'Stop' : voiceStatus === 'transcribing' ? 'Transcribing' : 'Voice'}
-            </button>
-            <button
-              type="button"
-              onClick={saveCapture}
-              disabled={!captureText.trim() || captureStatus === 'saving'}
-              className="inline-flex h-7 items-center gap-1 rounded bg-primary px-2.5 text-xs font-medium text-white disabled:opacity-40"
-            >
-              <Send className="h-3.5 w-3.5" />
-              {captureStatus === 'saving' ? 'Saving' : 'Capture'}
-            </button>
-          </div>
-          {(captureStatus !== 'idle' || voiceStatus !== 'idle') && (
-            <div className="absolute left-1/2 top-11 z-50 w-full max-w-5xl -translate-x-1/2 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-on-surface-variant shadow-lg">
-              {captureStatus === 'saved' && `Saved to ${lastSavedPath || 'vault'}.`}
-              {captureStatus === 'error' && 'Save failed.'}
-              {voiceStatus === 'recording' && 'Recording. Press Stop when finished.'}
-              {voiceStatus === 'transcribing' && 'Transcribing voice capture...'}
-              {voiceStatus === 'error' && `Voice failed: ${voiceError}`}
+              <button
+                type="button"
+                onClick={saveCapture}
+                disabled={!captureText.trim() || captureStatus === 'saving'}
+                className="mt-0.5 inline-flex h-7 shrink-0 items-center gap-1 rounded bg-primary px-2.5 text-xs font-medium text-white disabled:opacity-40"
+              >
+                <Send className="h-3.5 w-3.5" />
+                {captureStatus === 'saving' ? 'Saving' : 'Capture'}
+              </button>
             </div>
-          )}
+            {(captureStatus !== 'idle' || voiceStatus !== 'idle') && (
+              <div className="mt-1 border-t border-border/70 pt-1.5 text-xs text-on-surface-variant">
+                {captureStatus === 'saved' && `Saved to ${lastSavedPath || 'vault'}.`}
+                {captureStatus === 'error' && 'Save failed.'}
+                {voiceStatus === 'recording' && 'Recording. Press Stop when finished.'}
+                {voiceStatus === 'transcribing' && 'Transcribing voice capture...'}
+                {voiceStatus === 'error' && `Voice failed: ${voiceError}`}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right section */}

@@ -2,14 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { CalendarDays, CheckCircle2, Circle, Database, RefreshCw, Shield } from 'lucide-react';
+import AssistantActionsPanel, { type AssistantReview, type AssistantTask } from './AssistantActionsPanel';
 
-interface PlannerTask {
-  id: string;
-  title: string;
-  area: 'Product' | 'Health' | 'Family' | 'Admin';
-  status: 'suggested' | 'planned' | 'done';
-  source: string;
-}
+type PlannerTask = AssistantTask;
 
 interface PlannerProjection {
   title: string;
@@ -23,16 +18,35 @@ const areaColor: Record<PlannerTask['area'], string> = {
   Health: 'border-amber-500 bg-amber-500/5',
   Family: 'border-rose-500 bg-rose-500/5',
   Admin: 'border-slate-500 bg-slate-500/5',
+  AI: 'border-blue-500 bg-blue-500/5',
+  Business: 'border-emerald-500 bg-emerald-500/5',
+  Wealth: 'border-violet-500 bg-violet-500/5',
+  Routine: 'border-cyan-500 bg-cyan-500/5',
+  Work: 'border-slate-500 bg-slate-500/5',
+  Travel: 'border-sky-500 bg-sky-500/5',
+  Trading: 'border-indigo-500 bg-indigo-500/5',
+  Car: 'border-slate-500 bg-slate-500/5',
+  Politics: 'border-slate-500 bg-slate-500/5',
+  Startup: 'border-blue-500 bg-blue-500/5',
 };
 
 export default function PlannerView() {
   const [projection, setProjection] = useState<PlannerProjection | null>(null);
+  const [assistantReview, setAssistantReview] = useState<AssistantReview | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/planner')
-      .then((res) => res.json())
-      .then(setProjection)
+    const fetchOptions: RequestInit = { cache: 'no-store' };
+    const cacheBust = `t=${Date.now()}`;
+
+    Promise.all([
+      fetch(`/api/planner?${cacheBust}`, fetchOptions).then((res) => res.json()),
+      fetch(`/api/assistant/review?${cacheBust}`, fetchOptions).then((res) => res.json()).catch(() => null),
+    ])
+      .then(([projectionData, assistantReviewData]) => {
+        setProjection(projectionData);
+        setAssistantReview(assistantReviewData);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -51,6 +65,11 @@ export default function PlannerView() {
       </div>
     );
   }
+
+  const reviewTasks = projection.tasks
+    .filter((task) => task.horizon === 'this-week' || task.status === 'review')
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+    .slice(0, 6);
 
   return (
     <div className="flex w-full max-w-[1440px] flex-col gap-4">
@@ -104,6 +123,8 @@ export default function PlannerView() {
         </section>
 
         <aside className="flex flex-col gap-4">
+          <AssistantActionsPanel assistantReview={assistantReview} reviewTasks={reviewTasks} compact />
+
           <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
             <div className="mb-3 flex items-center gap-2">
               <Database className="h-4 w-4 text-primary" />
