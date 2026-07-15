@@ -397,7 +397,7 @@ export default function TodayView() {
 
   return (
     <div className="flex w-full max-w-none min-w-0 flex-col gap-4 overflow-hidden pb-8">
-      <div className="grid w-full max-w-full min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid w-full max-w-full min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="flex w-full max-w-full min-w-0 flex-col gap-4">
           <section className="w-full max-w-full min-w-0 rounded-lg border border-border bg-surface p-4 shadow-sm">
             <div className="mb-4 flex flex-col gap-3">
@@ -538,7 +538,7 @@ export default function TodayView() {
           </section>
         </div>
 
-        <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start">
+        <aside className="min-w-0 xl:sticky xl:top-0 xl:self-start">
           <section className="rounded-lg border border-border bg-surface p-4 shadow-sm xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
