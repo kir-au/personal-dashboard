@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, ExternalLink, Image as ImageIcon } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { CalendarClock, CheckCircle2, ExternalLink, Image as ImageIcon, Loader2 } from 'lucide-react';
 
 interface ExerciseKey {
   code: string;
@@ -23,6 +23,8 @@ interface RehabDay {
   planStatus?: string;
   sourcePath?: string;
   sourceDay?: number;
+  scheduledFromDate?: string;
+  scheduleUpdatedAt?: string;
   actual?: {
     summary?: string;
     completed?: ActualExercise[];
@@ -85,6 +87,7 @@ interface HealthActivityEntry {
     method?: string;
     bodyWeightKg?: number;
     totalEstimatedCalories?: number;
+    quality?: string;
     assumptions?: string[];
   };
   notes?: string[];
@@ -105,12 +108,17 @@ interface LoggedActivity {
 interface Exercise {
   code: string;
   name: string;
-  image: string;
+  image?: string;
+  images?: string[];
   dose: string;
   why: string;
   how: string;
   avoid: string;
-  source: string;
+  source?: string;
+  reviewStatus?: 'reviewed' | 'needs-visual-confirmation';
+  sourceLabel?: string;
+  imageSource?: string;
+  imageSourceLabel?: string;
 }
 
 interface ExerciseLibrary {
@@ -125,6 +133,7 @@ const kindStyle: Record<string, string> = {
   review: 'border-violet-300 bg-violet-50',
   'run-quality': 'border-red-300 bg-red-50',
   'run-long': 'border-sky-300 bg-sky-50',
+  kettlebell: 'border-cyan-300 bg-cyan-50',
   activity: 'border-emerald-300 bg-emerald-50',
   plan: 'border-slate-300 bg-slate-50',
 };
@@ -134,9 +143,13 @@ export default function HealthView() {
   const [exerciseLibrary, setExerciseLibrary] = useState<Exercise[]>([]);
   const [selectedExerciseCode, setSelectedExerciseCode] = useState<string | null>(null);
   const [selectedDayNumber, setSelectedDayNumber] = useState<number | null>(null);
+  const [moveDate, setMoveDate] = useState('');
+  const [movingSession, setMovingSession] = useState(false);
+  const [moveMessage, setMoveMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const dayRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const hasFocusedTimelineRef = useRef(false);
 
   useEffect(() => {
     Promise.all([
@@ -150,8 +163,14 @@ export default function HealthView() {
           ? Number(new URLSearchParams(window.location.search).get('day'))
           : NaN;
         const planDays = buildDisplayedDays(planData);
-        const initialDay = planDays.find((day) => day.day === requestedDay) || planData.today || planData.upcoming || planDays[0] || null;
+        const initialDay = planDays.find((day) => day.day === requestedDay)
+          || planData.today
+          || planData.upcoming
+          || planDays.find((day) => day.date >= planData.todayDate)
+          || planDays.at(-1)
+          || null;
         setSelectedDayNumber(initialDay?.day || null);
+        setMoveDate(initialDay?.date || '');
         const firstTodayCode = extractExerciseCodes(initialDay?.plan || '', exerciseData.exercises || [])[0];
         setSelectedExerciseCode(firstTodayCode || null);
       })
@@ -163,6 +182,13 @@ export default function HealthView() {
   }, [exerciseLibrary]);
 
   const selectedExercise = selectedExerciseCode ? exerciseByCode[selectedExerciseCode] : null;
+  const selectedExerciseImages = selectedExercise
+    ? selectedExercise.images?.length
+      ? selectedExercise.images
+      : selectedExercise.image
+        ? [selectedExercise.image]
+        : []
+    : [];
   const activityByDate = useMemo(() => {
     const map = new Map<string, HealthActivityEntry[]>();
     for (const entry of plan?.activityLog || []) {
@@ -180,18 +206,35 @@ export default function HealthView() {
     return displayedDays.find((day) => day.day === selectedDayNumber) || plan.today || plan.upcoming || displayedDays[0] || null;
   }, [displayedDays, plan, selectedDayNumber]);
 
-  useEffect(() => {
-    if (!selectedDayNumber) return;
+  useLayoutEffect(() => {
+    if (!selectedDayNumber || hasFocusedTimelineRef.current) return;
     const timeline = timelineRef.current;
-    const dayRow = dayRefs.current[selectedDayNumber];
-    if (!timeline || !dayRow) return;
+    const yesterday = displayedDays.find((day) => day.date === addCalendarDays(plan?.todayDate || '', -1));
+    const memoryRow = yesterday ? dayRefs.current[yesterday.day] : null;
+    if (!timeline || !memoryRow) return;
+    hasFocusedTimelineRef.current = true;
 
-    const rowTop = dayRow.offsetTop - timeline.offsetTop;
-    timeline.scrollTo({ top: Math.max(rowTop, 0), behavior: 'auto' });
-  }, [selectedDayNumber, plan]);
+    const focusYesterday = () => {
+      focusTimelineRow(timeline, memoryRow);
+    };
+    let nestedFrame = 0;
+    const frame = window.requestAnimationFrame(() => {
+      nestedFrame = window.requestAnimationFrame(() => {
+        focusYesterday();
+      });
+    });
+    const restorationFrame = window.setTimeout(focusYesterday, 250);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(nestedFrame);
+      window.clearTimeout(restorationFrame);
+    };
+  }, [displayedDays, plan?.todayDate, selectedDayNumber]);
 
   const selectDay = (day: RehabDay) => {
     setSelectedDayNumber(day.day);
+    setMoveDate(day.date);
+    setMoveMessage('');
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.set('view', 'health');
@@ -200,6 +243,38 @@ export default function HealthView() {
     }
     const firstCode = extractExerciseCodes(day.plan, exerciseLibrary)[0];
     setSelectedExerciseCode(firstCode || null);
+  };
+
+  const moveSession = async (day: RehabDay, toDate: string) => {
+    if (!day.planId || !day.sourceDay || !toDate || day.date === toDate) return;
+    setMovingSession(true);
+    setMoveMessage('');
+    try {
+      const response = await fetch('/api/health/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId: day.planId,
+          sourceDay: day.sourceDay,
+          toDate,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Unable to move this session.');
+
+      const refreshed = await fetch(`/api/health/project?ts=${Date.now()}`, { cache: 'no-store' }).then((res) => res.json()) as RehabPlan;
+      setPlan(refreshed);
+      const movedDay = buildDisplayedDays(refreshed).find(
+        (candidate) => candidate.planId === day.planId && candidate.sourceDay === day.sourceDay
+      );
+      setSelectedDayNumber(movedDay?.day || null);
+      setMoveDate(movedDay?.date || toDate);
+      setMoveMessage(`Moved to ${formatLongDate(toDate)}.`);
+    } catch (error) {
+      setMoveMessage(error instanceof Error ? error.message : 'Unable to move this session.');
+    } finally {
+      setMovingSession(false);
+    }
   };
 
   if (loading) {
@@ -216,7 +291,7 @@ export default function HealthView() {
         <div className="mb-3 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold text-on-surface">Plan timeline</h3>
-            <p className="text-xs text-on-surface-variant">Plan, logged activity, completion, and calories in one place.</p>
+            <p className="text-xs text-on-surface-variant">Yesterday&apos;s recorded activity stays above today; scroll back for the past 7 days.</p>
           </div>
           <span className="text-xs text-on-surface-variant">
             {displayedDays[0]?.label} - {displayedDays[displayedDays.length - 1]?.label}
@@ -230,13 +305,25 @@ export default function HealthView() {
             <div>Type</div>
             <div>Plan</div>
           </div>
-          <div ref={timelineRef} className="max-h-[460px] overflow-y-auto scroll-smooth">
+          <div ref={timelineRef} className="max-h-[460px] overflow-y-auto">
             {displayedDays.map((day) => {
               const isToday = day.date === plan.todayDate;
               const isSelected = day.day === selectedDay?.day;
               const isPast = plan.today && day.date < plan.todayDate;
               const dayActivities = activityByDate.get(day.date) || [];
-              const loggedCalories = dayActivities.reduce((sum, entry) => sum + (entry.calories?.totalEstimatedCalories || 0), 0);
+              const estimatedActivityEnergy = dayActivities
+                .filter((entry) => entry.calories?.quality !== 'unverified')
+                .reduce((sum, entry) => sum + (entry.calories?.totalEstimatedCalories || 0), 0);
+              const unverifiedDeviceEnergy = dayActivities
+                .filter((entry) => entry.calories?.quality === 'unverified')
+                .reduce((sum, entry) => sum + (entry.calories?.totalEstimatedCalories || 0), 0);
+              const canMove = Boolean(
+                day.planId
+                && day.sourceDay
+                && !day.completed
+                && day.planId !== 'activity-log'
+                && day.planId !== 'health-baseline'
+              );
               return (
                 <div
                   key={`${day.date}-${day.day}`}
@@ -276,8 +363,9 @@ export default function HealthView() {
                       <p className="mt-1 text-on-surface-variant">{day.plan}</p>
                       {dayActivities.length > 0 && (
                         <p className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
-                          Logged: {dayActivities.map((entry) => entry.summary).join(' / ')}
-                          {loggedCalories ? ` · ~${loggedCalories} kcal` : ''}
+                          Logged: {dayActivities.map((entry) => `${entry.source === 'health-connect' ? 'Watch sync' : 'Captured'}: ${entry.summary}`).join(' / ')}
+                          {estimatedActivityEnergy ? ` · estimated activity energy ~${estimatedActivityEnergy} kcal` : ''}
+                          {unverifiedDeviceEnergy ? ` · Fitbit energy ~${unverifiedDeviceEnergy} kcal (unverified)` : ''}
                         </p>
                       )}
                       {day.actual?.summary && (
@@ -299,6 +387,55 @@ export default function HealthView() {
                           </button>
                         ))}
                       </div>
+                      {isSelected && canMove ? (
+                        <div
+                          className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <CalendarClock className="h-4 w-4 text-primary" />
+                          <span className="text-xs font-medium text-on-surface">Move session</span>
+                          <button
+                            type="button"
+                            onClick={() => moveSession(day, plan.todayDate)}
+                            disabled={movingSession || day.date === plan.todayDate}
+                            className="h-8 rounded border border-border bg-surface px-2.5 text-xs text-on-surface hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Today
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveSession(day, addCalendarDays(plan.todayDate, 1))}
+                            disabled={movingSession || day.date === addCalendarDays(plan.todayDate, 1)}
+                            className="h-8 rounded border border-border bg-surface px-2.5 text-xs text-on-surface hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Tomorrow
+                          </button>
+                          <input
+                            type="date"
+                            value={moveDate}
+                            onChange={(event) => setMoveDate(event.target.value)}
+                            className="h-8 rounded border border-border bg-surface px-2 text-xs text-on-surface"
+                            aria-label="New session date"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => moveSession(day, moveDate)}
+                            disabled={movingSession || !moveDate || day.date === moveDate}
+                            className="inline-flex h-8 items-center gap-1.5 rounded border border-primary bg-primary px-3 text-xs font-medium text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {movingSession ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarClock className="h-3.5 w-3.5" />}
+                            Move
+                          </button>
+                          {day.scheduledFromDate ? (
+                            <span className="text-xs text-on-surface-variant">
+                              Previously {formatShortDate(day.scheduledFromDate)}
+                            </span>
+                          ) : null}
+                          {moveMessage ? (
+                            <span className="w-full text-xs text-on-surface-variant">{moveMessage}</span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                     <span
                       className={`mt-1 rounded-full border p-1.5 ${
@@ -324,19 +461,46 @@ export default function HealthView() {
 
       {selectedExercise ? (
         <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-          <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-            <div className="overflow-hidden rounded-lg border border-border bg-surface-variant">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`/api/vault-asset/${encodeURIComponent(selectedExercise.image)}`}
-                alt={selectedExercise.name}
-                className="h-64 w-full object-cover"
-              />
-            </div>
+          <div className={`grid gap-4 ${selectedExerciseImages.length ? 'lg:grid-cols-[360px_1fr]' : ''}`}>
+            {selectedExerciseImages.length ? (
+              <div>
+                <div className={`grid overflow-hidden rounded-lg border border-border bg-white ${
+                  selectedExerciseImages.length > 1 ? 'grid-cols-2' : ''
+                }`}>
+                  {selectedExerciseImages.map((image, index) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={image}
+                      src={image.startsWith('http')
+                        ? image
+                        : `/api/vault-asset/${encodeURIComponent(image)}`}
+                      alt={`${selectedExercise.name}${selectedExerciseImages.length > 1 ? `, phase ${index + 1}` : ''}`}
+                      className="h-80 w-full object-contain"
+                    />
+                  ))}
+                </div>
+                {selectedExercise.imageSource ? (
+                  <a
+                    href={selectedExercise.imageSource}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                  >
+                    {selectedExercise.imageSourceLabel || 'Image source'}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
             <div>
-              <div className="mb-2 flex items-center gap-2 text-primary">
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-primary">
                 <ImageIcon className="h-4 w-4" />
                 <span className="text-xs font-semibold uppercase tracking-wide">Exercise detail</span>
+                {selectedExercise.reviewStatus === 'needs-visual-confirmation' ? (
+                  <span className="rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    Needs visual confirmation
+                  </span>
+                ) : null}
               </div>
               <h3 className="text-xl font-semibold text-on-surface">
                 {selectedExercise.code}. {selectedExercise.name}
@@ -356,15 +520,19 @@ export default function HealthView() {
                   <p className="mt-1 text-sm text-on-surface">{selectedExercise.avoid}</p>
                 </div>
               </div>
-              <a
-                href={selectedExercise.source}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
-              >
-                Source
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
+              {selectedExercise.source ? (
+                <a
+                  href={selectedExercise.source.startsWith('http')
+                    ? selectedExercise.source
+                    : `/?view=vault&path=${encodeURIComponent(selectedExercise.source)}`}
+                  target={selectedExercise.source.startsWith('http') ? '_blank' : undefined}
+                  rel={selectedExercise.source.startsWith('http') ? 'noreferrer' : undefined}
+                  className="mt-3 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                >
+                  {selectedExercise.sourceLabel || 'Source'}
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              ) : null}
             </div>
           </div>
         </section>
@@ -440,7 +608,7 @@ export default function HealthView() {
         <details>
           <summary className="cursor-pointer text-sm font-semibold text-on-surface">Exercise key reference</summary>
           <div className="mt-3 flex flex-wrap gap-2">
-            {plan.exerciseKey.map((item) => (
+            {exerciseLibrary.map((item) => (
               <button
                 key={item.code}
                 onClick={() => setSelectedExerciseCode(item.code)}
@@ -450,7 +618,7 @@ export default function HealthView() {
                     : 'border-teal-300 bg-teal-50 text-teal-950 hover:border-primary'
                 }`}
               >
-                <strong>{item.code}</strong> = {item.label}
+                <strong>{item.code}</strong> = {item.name}
               </button>
             ))}
           </div>
@@ -462,7 +630,8 @@ export default function HealthView() {
 }
 
 function buildDisplayedDays(plan: RehabPlan): RehabDay[] {
-  const days = [...(plan.days || [])];
+  const earliestVisibleDate = addCalendarDays(plan.todayDate, -6);
+  const days = [...(plan.days || [])].filter((day) => day.date >= earliestVisibleDate);
   const plannedDates = new Set(days.map((day) => day.date));
   for (const entry of plan.activityLog || []) {
     if (plannedDates.has(entry.date)) continue;
@@ -479,8 +648,33 @@ function buildDisplayedDays(plan: RehabPlan): RehabDay[] {
       projectId: 'health',
       planTitle: 'Health activity',
     });
+    plannedDates.add(entry.date);
+  }
+  for (const offset of [-1, 0, 1]) {
+    const date = addCalendarDays(plan.todayDate, offset);
+    if (plannedDates.has(date)) continue;
+    days.push({
+      day: 800000 + offset + 1,
+      date,
+      label: formatShortDate(date),
+      kind: 'plan',
+      title: offset === 1 ? 'Health baseline for tomorrow' : 'Health check-in',
+      plan: offset === 1
+        ? 'No fixed session is scheduled. Choose movement based on recovery, then log it through capture or Health Connect.'
+        : 'No manual or device activity is recorded for this day yet.',
+      completed: false,
+      planId: 'health-baseline',
+      projectId: 'health',
+      planTitle: 'Daily health',
+    });
   }
   return days.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function addCalendarDays(dateValue: string, offset: number) {
+  const date = new Date(`${dateValue}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
 }
 
 function extractExerciseCodes(planText: string, exercises: Exercise[]) {
@@ -497,4 +691,23 @@ function formatShortDate(dateValue: string) {
     day: 'numeric',
     month: 'short',
   }).format(new Date(`${dateValue}T00:00:00`));
+}
+
+function formatLongDate(dateValue: string) {
+  return new Intl.DateTimeFormat('en-AU', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(new Date(`${dateValue}T00:00:00`));
+}
+
+function focusTimelineRow(timeline: HTMLElement, row: HTMLElement) {
+  timeline.style.paddingBottom = '0px';
+  const timelineTop = timeline.getBoundingClientRect().top;
+  const rowTop = row.getBoundingClientRect().top - timelineTop + timeline.scrollTop;
+  const requiredBottomSpace = Math.max(0, rowTop + timeline.clientHeight - timeline.scrollHeight);
+  timeline.style.paddingBottom = `${Math.ceil(requiredBottomSpace)}px`;
+  timeline.scrollTop = row.getBoundingClientRect().top
+    - timeline.getBoundingClientRect().top
+    + timeline.scrollTop;
 }

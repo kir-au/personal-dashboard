@@ -10,7 +10,7 @@ ChatGPT mobile -> ChatGPT connector -> HTTPS MCP endpoint -> Personal Vault file
 
 The first MCP server is `mcp/personal-vault-server.mjs`. It exposes:
 
-- `capture_note`: save an approved note, task, decision, workout note, or conversation summary as readable Markdown.
+- `capture_note`: save an approved note, task, decision, workout note, image-backed note, or conversation summary as readable Markdown.
 - `capture_note` also creates reviewable proposed actions and returns them to ChatGPT.
 - `apply_capture_action`: apply one proposed action after explicit user approval.
 - `get_today_plan`: read today's Health and AI commitments from the vault.
@@ -68,7 +68,7 @@ Once linked on ChatGPT web, the connector should be available in ChatGPT mobile.
 
 For a durable deployment, use a small Node host that can access the vault:
 
-- private home server + Cloudflare Tunnel,
+- local Mac/home server with the reserved ngrok domain,
 - VPS with encrypted vault checkout/sync,
 - container service with persistent encrypted volume.
 
@@ -122,6 +122,54 @@ Save this to Personal Vault under AI as a task: tomorrow I need to define the mo
 ```text
 Search Personal Vault for shoulder rehab decisions.
 ```
+
+## Image capture
+
+`capture_note` accepts optional image attachments. The server stores them exactly like imported ChatGPT export assets:
+
+```text
+raw/YYYY/MM/YYYY-MM-DD-capture-title.md
+raw/YYYY/MM/YYYY-MM-DD-capture-title.assets/
+  01-image-name.jpg
+```
+
+The Markdown file gets relative links such as:
+
+```md
+![Breakfast photo](./2026-07-17-capture-breakfast.assets/01-breakfast.jpg)
+```
+
+Tool input shape:
+
+```json
+{
+  "input": "Breakfast photo. Please save and estimate later.",
+  "title": "Breakfast photo",
+  "projectId": "health",
+  "intent": "note",
+  "attachments": [
+    {
+      "name": "breakfast.jpg",
+      "mimeType": "image/jpeg",
+      "dataBase64": "...base64 bytes...",
+      "alt": "Breakfast plate",
+      "caption": "Photo captured from mobile"
+    }
+  ]
+}
+```
+
+`dataUrl` is also accepted instead of `mimeType` + `dataBase64`, for example `data:image/jpeg;base64,...`.
+
+Supported MIME types: `image/jpeg`, `image/png`, `image/gif`, `image/webp`, `image/svg+xml`.
+
+The server appends asset records to:
+
+```text
+indexes/capture-assets.jsonl
+```
+
+Important limitation: plain ChatGPT MCP tool calls may not automatically receive the original bytes of images uploaded into ChatGPT. If ChatGPT cannot pass `dataBase64`/`dataUrl`, it can still save a text/OCR description, but preserving the original image requires a UI/app upload path, dashboard upload, mobile shortcut, or another client that can send the bytes to `capture_note`.
 
 ## Capture routing rules
 

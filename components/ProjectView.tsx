@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Brain,
   Archive,
@@ -132,6 +132,7 @@ interface SelectedVaultFile {
 interface ProjectTimelineItem {
   id: string;
   priority: number;
+  date?: string;
   dateLabel: string;
   status: string;
   title: string;
@@ -247,6 +248,36 @@ function formatProjectDate(dateValue?: string) {
   }).format(new Date(`${dateValue}T00:00:00`));
 }
 
+function projectDateValue(date?: string) {
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
+  return date;
+}
+
+function addDays(date: string, days: number) {
+  const value = new Date(`${date}T00:00:00`);
+  value.setDate(value.getDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function localDateValue() {
+  const value = new Date();
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isCompletedTimelineItem(item: ProjectTimelineItem) {
+  return ['completed', 'done', 'archived'].includes(item.status.toLowerCase());
+}
+
+function timelineType(item: ProjectTimelineItem, today: string) {
+  if (isCompletedTimelineItem(item)) return 'completed';
+  if (item.date && item.date < today) return 'overdue';
+  if (item.date === today) return 'today';
+  return 'plan';
+}
+
 function buildProjectTimelineItems(
   project: { next: string },
   insights: ProjectInsights | null,
@@ -259,6 +290,7 @@ function buildProjectTimelineItems(
       .map((item) => ({
         id: item.id,
         priority: item.priority,
+        date: projectDateValue(item.targetDate),
         dateLabel: formatProjectDate(item.targetDate) || item.horizon,
         status: item.status,
         title: item.title,
@@ -274,6 +306,7 @@ function buildProjectTimelineItems(
     return insights.suggestedActions.map((action, index) => ({
       id: `action-${index}-${action.title}`,
       priority: 100 - index * 10,
+      date: undefined,
       dateLabel: action.horizon,
       status: 'suggested',
       title: action.title,
@@ -287,6 +320,7 @@ function buildProjectTimelineItems(
     return insights.workstreams.map((workstream, index) => ({
       id: `workstream-${index}-${workstream.title}`,
       priority: 90 - index * 10,
+      date: undefined,
       dateLabel: 'this-week',
       status: 'review',
       title: workstream.title,
@@ -300,6 +334,7 @@ function buildProjectTimelineItems(
     return sources.conversations.slice(0, 8).map((conversation, index) => ({
       id: `source-${conversation.conversationId}`,
       priority: 90 - index * 5,
+      date: projectDateValue(conversation.vaultDate || undefined),
       dateLabel: conversation.vaultDate
         ? formatProjectDate(conversation.vaultDate) || conversation.vaultDate
         : 'source',
@@ -316,6 +351,7 @@ function buildProjectTimelineItems(
   return [{
     id: 'project-next-step',
     priority: 100,
+    date: undefined,
     dateLabel: 'next',
     status: 'candidate',
     title: 'Next useful step',
@@ -354,6 +390,8 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
   const [fileContent, setFileContent] = useState<any>(null);
   const [contentLoading, setContentLoading] = useState(false);
   const [archiveStatus, setArchiveStatus] = useState<'idle' | 'saving' | 'error'>('idle');
+  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const timelineItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   useEffect(() => {
     fetch('/api/projects')
@@ -423,20 +461,76 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
     () => buildProjectTimelineItems(project, insights, sources),
     [project.next, insights, sources]
   );
+  const timelineToday = useMemo(() => localDateValue(), []);
+  const historyStart = useMemo(() => addDays(timelineToday, -7), [timelineToday]);
+  const planningEnd = useMemo(() => addDays(timelineToday, 21), [timelineToday]);
+  const displayedTimelineItems = useMemo(() => {
+    const history = projectTimelineItems
+      .filter((item) => isCompletedTimelineItem(item) && (!item.date || (item.date >= historyStart && item.date <= timelineToday)))
+      .sort((a, b) => (a.date || '').localeCompare(b.date || '') || b.priority - a.priority);
+
+    const open = projectTimelineItems
+      .filter((item) => {
+        if (isCompletedTimelineItem(item)) return false;
+        if (!item.date) return true;
+        return item.date <= planningEnd;
+      })
+      .sort((a, b) => {
+        const aToday = a.date === timelineToday ? 0 : a.date && a.date < timelineToday ? 1 : 2;
+        const bToday = b.date === timelineToday ? 0 : b.date && b.date < timelineToday ? 1 : 2;
+        if (aToday !== bToday) return aToday - bToday;
+        if (a.date && b.date && a.date !== b.date) return a.date.localeCompare(b.date);
+        return b.priority - a.priority;
+      });
+
+    return [...history, ...open];
+  }, [historyStart, planningEnd, projectTimelineItems, timelineToday]);
   const selectedTimelineItem =
-    projectTimelineItems.find((item) => item.id === selectedTimelineId) ||
-    projectTimelineItems[0] ||
+    displayedTimelineItems.find((item) => item.id === selectedTimelineId) ||
+    displayedTimelineItems.find((item) => item.date === timelineToday) ||
+    displayedTimelineItems.find((item) => !isCompletedTimelineItem(item)) ||
+    displayedTimelineItems[0] ||
     null;
 
   useEffect(() => {
-    if (!projectTimelineItems.length) {
+    if (!displayedTimelineItems.length) {
       setSelectedTimelineId(null);
       return;
     }
-    if (!selectedTimelineId || !projectTimelineItems.some((item) => item.id === selectedTimelineId)) {
-      setSelectedTimelineId(projectTimelineItems[0].id);
+    if (!selectedTimelineId || !displayedTimelineItems.some((item) => item.id === selectedTimelineId)) {
+      const preferred = displayedTimelineItems.find((item) => item.date === timelineToday)
+        || displayedTimelineItems.find((item) => !isCompletedTimelineItem(item))
+        || displayedTimelineItems[0];
+      setSelectedTimelineId(preferred.id);
     }
-  }, [projectTimelineItems, selectedTimelineId]);
+  }, [displayedTimelineItems, selectedTimelineId, timelineToday]);
+
+  useLayoutEffect(() => {
+    if (!selectedTimelineItem || !timelineRef.current) return;
+    const row = timelineItemRefs.current[selectedTimelineItem.id];
+    if (!row) return;
+    const previousRow = row.previousElementSibling instanceof HTMLElement
+      ? row.previousElementSibling
+      : null;
+    if (!previousRow) return;
+
+    const timeline = timelineRef.current;
+    const focusYesterday = () => {
+      focusTimelineRow(timeline, previousRow);
+    };
+    let nestedFrame = 0;
+    const frame = window.requestAnimationFrame(() => {
+      nestedFrame = window.requestAnimationFrame(() => {
+        focusYesterday();
+      });
+    });
+    const restorationFrame = window.setTimeout(focusYesterday, 250);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(nestedFrame);
+      window.clearTimeout(restorationFrame);
+    };
+  }, [selectedTimelineItem?.id]);
 
   const openVaultFile = async (relativePath: string) => {
     const name = relativePath.split('/').pop() || relativePath;
@@ -516,7 +610,7 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
             </div>
             <h2 className="text-xl font-semibold text-on-surface">Plan timeline</h2>
             <p className="text-sm text-on-surface-variant">
-              Current priorities, selected detail, and recorded source context in one place.
+              Yesterday&apos;s completed context stays above today; open priorities continue through the next 3 weeks.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -524,7 +618,7 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
               {project.status}
             </span>
             <span className="rounded border border-primary/30 bg-active px-3 py-1.5 text-xs font-medium text-primary">
-              {projectTimelineItems.length} item{projectTimelineItems.length === 1 ? '' : 's'}
+              {displayedTimelineItems.length} item{displayedTimelineItems.length === 1 ? '' : 's'}
             </span>
             {!project.system && (
               <button
@@ -542,30 +636,42 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
 
         <div className="overflow-hidden rounded-lg border border-border">
           <div className="grid grid-cols-[110px_130px_110px_1fr] bg-surface-variant px-3 py-2 text-xs font-semibold text-on-surface">
-            <div>Plan</div>
-            <div>Target</div>
-            <div>Status</div>
+            <div>Priority</div>
+            <div>Date</div>
+            <div>Type</div>
             <div>Plan</div>
           </div>
-          <div className="max-h-[520px] overflow-y-auto">
-            {projectTimelineItems.map((item, index) => {
+          <div ref={timelineRef} className="max-h-[520px] overflow-y-auto">
+            {displayedTimelineItems.map((item) => {
               const isSelected = selectedTimelineItem?.id === item.id;
+              const type = timelineType(item, timelineToday);
+              const isToday = item.date === timelineToday;
+              const typeStyle = type === 'completed'
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                : type === 'overdue'
+                  ? 'border-amber-300 bg-amber-50 text-amber-900'
+                  : type === 'today'
+                    ? 'border-primary/30 bg-active text-primary'
+                    : 'border-border bg-surface text-on-surface-variant';
               return (
                 <button
                   key={item.id}
+                  ref={(node) => {
+                    timelineItemRefs.current[item.id] = node;
+                  }}
                   onClick={() => setSelectedTimelineId(item.id)}
-                  className={`grid w-full grid-cols-[110px_130px_110px_1fr] border-t border-border px-3 py-3 text-left text-sm ${
-                    isSelected ? 'bg-active' : index === 0 ? 'bg-hover' : 'bg-surface hover:bg-hover'
+                  className={`grid w-full grid-cols-[110px_130px_110px_1fr] border-t border-border px-3 py-3 text-left text-sm transition-colors ${
+                    isSelected ? 'bg-active' : isToday ? 'bg-blue-50' : type === 'completed' ? 'bg-surface text-on-surface-variant opacity-75 hover:bg-hover' : 'bg-surface hover:bg-hover'
                   }`}
                 >
                   <div>
                     <p className="font-semibold text-on-surface">P{item.priority}</p>
-                    {index === 0 && <p className="mt-1 text-xs text-on-surface-variant">current</p>}
+                    {isToday && <p className="mt-1 text-xs text-primary">current</p>}
                   </div>
                   <div className="text-on-surface-variant">{item.dateLabel}</div>
                   <div>
-                    <span className="inline-flex rounded border border-border bg-surface px-2 py-0.5 text-xs text-on-surface-variant">
-                      {item.status}
+                    <span className={`inline-flex rounded border px-2 py-0.5 text-xs ${typeStyle}`}>
+                      {type}
                     </span>
                   </div>
                   <div className="min-w-0">
@@ -580,9 +686,9 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
                 </button>
               );
             })}
-            {!projectTimelineItems.length && (
+            {!displayedTimelineItems.length && (
               <div className="border-t border-border p-6 text-sm text-on-surface-variant">
-                No active project timeline yet.
+                No completed work in the last 7 days or open priorities in the next 3 weeks.
               </div>
             )}
           </div>
@@ -748,4 +854,15 @@ export default function ProjectView({ projectId }: ProjectViewProps) {
       />
     </div>
   );
+}
+
+function focusTimelineRow(timeline: HTMLElement, row: HTMLElement) {
+  timeline.style.paddingBottom = '0px';
+  const timelineTop = timeline.getBoundingClientRect().top;
+  const rowTop = row.getBoundingClientRect().top - timelineTop + timeline.scrollTop;
+  const requiredBottomSpace = Math.max(0, rowTop + timeline.clientHeight - timeline.scrollHeight);
+  timeline.style.paddingBottom = `${Math.ceil(requiredBottomSpace)}px`;
+  timeline.scrollTop = row.getBoundingClientRect().top
+    - timeline.getBoundingClientRect().top
+    + timeline.scrollTop;
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CalendarDays, CheckCircle2, Circle, Database, RefreshCw, Shield } from 'lucide-react';
+import { CheckCircle2, Circle, Database, RefreshCw, Shield } from 'lucide-react';
 import AssistantActionsPanel, { type AssistantReview, type AssistantTask } from './AssistantActionsPanel';
 
 type PlannerTask = AssistantTask;
@@ -73,22 +73,6 @@ export default function PlannerView() {
 
   return (
     <div className="flex w-full max-w-[1440px] flex-col gap-4">
-      <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-        <div className="relative">
-          <div style={{ width: 'min(760px, 100%)', paddingRight: '14rem' }}>
-            <div className="mb-2 flex items-center gap-2 text-primary">
-              <CalendarDays className="h-5 w-5" />
-              <span className="text-xs font-medium uppercase tracking-wide">Planner projection</span>
-            </div>
-            <h2 className="text-xl font-semibold text-on-surface">{projection.title}</h2>
-            <p className="mt-1 text-sm text-on-surface-variant">{projection.weekFocus}</p>
-          </div>
-          <div className="mt-3 inline-flex rounded-lg border border-border bg-surface-variant px-3 py-2 text-xs text-on-surface-variant md:absolute md:right-0 md:top-0 md:mt-0">
-            generated, not hand-authored
-          </div>
-        </div>
-      </section>
-
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">

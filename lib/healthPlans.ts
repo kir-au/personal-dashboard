@@ -1,5 +1,6 @@
 import fsp from 'fs/promises';
 import path from 'path';
+import { readLatestHealthScheduleEvents, scheduleKey } from '@/lib/healthSchedule';
 
 const VAULT_ROOT = path.join(process.env.HOME || '', 'personal-vault');
 const HEALTH_ROOT = path.join(VAULT_ROOT, 'structured', 'health');
@@ -36,6 +37,8 @@ export interface HealthPlanDay {
   planStatus?: string;
   sourcePath?: string;
   sourceDay?: number;
+  scheduledFromDate?: string;
+  scheduleUpdatedAt?: string;
 }
 
 export interface HealthPlanSummary {
@@ -177,9 +180,82 @@ function normalizeWeeklyRunningPlan(plan: any, sourcePath: string): HealthPlanSu
   };
 }
 
+function normalizeRecurringPlan(plan: any, sourcePath: string): HealthPlanSummary {
+  const schedule = plan.schedule || {};
+  const sessions = Array.isArray(plan.sessions) ? plan.sessions : [];
+  const progression = Array.isArray(plan.progression) ? plan.progression : [];
+  const startDate = plan.startDate;
+  const endDate = schedule.endDate;
+  const weekdays = Array.isArray(schedule.weekdays) ? schedule.weekdays.map(Number) : [];
+  const days: HealthPlanDay[] = [];
+
+  if (startDate && endDate && weekdays.length > 0) {
+    for (let date = startDate; date <= endDate; date = addDays(date, 1)) {
+      const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+      if (!weekdays.includes(weekday)) continue;
+      const session = sessions.find((candidate: any) => Number(candidate.weekday) === weekday);
+      if (!session) continue;
+
+      const phase = progression
+        .filter((candidate: any) => !candidate.starts || candidate.starts <= date)
+        .at(-1) || {};
+      const rounds = Number(session.rounds || schedule.rounds || 4);
+      const durationMin = Number(session.durationMin || schedule.durationMin || 20);
+      const exercises = Array.isArray(session.exercises) ? session.exercises : [];
+      const exercisePlan = exercises.map((exercise: any, index: number) => {
+        const baseReps = Number(exercise.baseReps || exercise.reps || 0);
+        const reps = exercise.progression === 'press'
+          ? Number(phase.pressReps || baseReps)
+          : Math.max(1, Math.round(baseReps * Number(phase.repMultiplier || 1)));
+        const side = exercise.perSide
+          ? '/side'
+          : exercise.alternateSides
+            ? ' (alternate side each round)'
+            : '';
+        return `${index + 1}. ${exercise.code || exercise.name} ${reps}${side}`;
+      }).join('; ');
+
+      days.push({
+        day: days.length + 1,
+        date,
+        label: formatDateLabel(date),
+        kind: session.kind || 'kettlebell',
+        title: `${session.title}${phase.label ? ` · ${phase.label}` : ''}`,
+        plan: `${durationMin}-minute EMOM, ${rounds} rounds. ${exercisePlan}.`,
+        completed: false,
+        planId: plan.id,
+        projectId: plan.projectId,
+        planTitle: plan.title,
+        planStatus: plan.status || 'active',
+        sourcePath,
+        sourceDay: days.length + 1,
+      });
+    }
+  }
+
+  return {
+    id: plan.id || path.basename(sourcePath, '.json'),
+    projectId: plan.projectId || plan.id || 'health',
+    title: plan.title || 'Recurring health plan',
+    status: plan.status || 'active',
+    startDate: plan.startDate || days[0]?.date || null,
+    goal: plan.goal || '',
+    rule: plan.rule || normalizePlanRules(plan).join(' '),
+    sourcePath,
+    today: null,
+    upcoming: null,
+    days,
+    notes: normalizePlanNotes(plan),
+    exerciseKey: Array.isArray(plan.exerciseKey) ? plan.exerciseKey : [],
+  };
+}
+
 function normalizePlan(plan: any, sourcePath: string): HealthPlanSummary {
   if (Array.isArray(plan.days)) return normalizeDailyPlan(plan, sourcePath);
   if (Array.isArray(plan.weeks)) return normalizeWeeklyRunningPlan(plan, sourcePath);
+  if (plan.schedule?.type === 'weekly-recurring' && Array.isArray(plan.sessions)) {
+    return normalizeRecurringPlan(plan, sourcePath);
+  }
   return normalizeDailyPlan({ ...plan, days: [] }, sourcePath);
 }
 
@@ -191,15 +267,31 @@ async function listHealthPlanFiles() {
     .sort();
 }
 
-export async function readHealthPlans() {
+export async function readHealthPlans(options: { includeInactive?: boolean } = {}) {
+  const includeInactive = options.includeInactive ?? false;
   const todayDate = getSydneyDate();
   const files = await listHealthPlanFiles();
+  const scheduleEvents = await readLatestHealthScheduleEvents();
   const plans: HealthPlanSummary[] = [];
 
   for (const file of files) {
     const raw = await fsp.readFile(file, 'utf-8');
     const relativePath = path.relative(VAULT_ROOT, file);
     const plan = normalizePlan(JSON.parse(raw), relativePath);
+    if (!includeInactive && ['paused', 'cancelled', 'archived', 'inactive'].includes(plan.status.toLowerCase())) continue;
+    plan.days = plan.days.map((day) => {
+      const event = day.sourceDay
+        ? scheduleEvents.get(scheduleKey(plan.id, day.sourceDay))
+        : null;
+      if (!event) return day;
+      return {
+        ...day,
+        date: event.toDate,
+        label: formatDateLabel(event.toDate),
+        scheduledFromDate: event.fromDate,
+        scheduleUpdatedAt: event.created,
+      };
+    });
     plan.days.sort((a, b) => a.date.localeCompare(b.date) || (a.planTitle || '').localeCompare(b.planTitle || ''));
     plan.today = plan.days.find((day) => day.date === todayDate) || null;
     plan.upcoming = plan.days.find((day) => day.date >= todayDate && !day.completed) || null;

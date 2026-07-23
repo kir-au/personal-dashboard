@@ -93,6 +93,47 @@ interface PublishingPlan {
   days?: PublishingDay[];
 }
 
+interface DaySnapshot {
+  date: string;
+  changedSummary: string;
+  captures: Array<{
+    title: string;
+    path: string | null;
+    source: string;
+    intent: string;
+    projectId: string | null;
+    created: string | null;
+  }>;
+  healthActivities: Array<{
+    summary: string;
+    status: string;
+    rawPath: string | null;
+    calories: number | null;
+    caloriesMethod?: string;
+    caloriesQuality?: string;
+    activities: Array<{
+      code?: string;
+      name?: string;
+      durationMin?: number;
+      distanceKm?: number | null;
+      load?: string | null;
+      reps?: number | null;
+      estimatedCalories?: number;
+    }>;
+  }>;
+  pendingQuestions: Array<{
+    question: string;
+    capturePath: string;
+    reviewPath: string;
+    interpretation: string;
+    proposals: Array<{
+      label?: string;
+      reason?: string;
+    }>;
+    approvalRequired: boolean;
+  }>;
+}
+
 interface AgendaItem {
   id: string;
   area: PlannerTask['area'];
@@ -227,6 +268,7 @@ export default function TodayView() {
   const [resume, setResume] = useState<ResumeData | null>(null);
   const [healthPlan, setHealthPlan] = useState<RehabPlan | null>(null);
   const [publishingPlan, setPublishingPlan] = useState<PublishingPlan | null>(null);
+  const [daySnapshot, setDaySnapshot] = useState<DaySnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string>(() => getInitialSelectedDate());
 
@@ -288,6 +330,24 @@ export default function TodayView() {
     return () => window.removeEventListener('popstate', syncDateFromUrl);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const cacheBust = `t=${Date.now()}`;
+
+    fetch(`/api/day?date=${encodeURIComponent(selectedDate)}&${cacheBust}`, { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setDaySnapshot(data);
+      })
+      .catch(() => {
+        if (!cancelled) setDaySnapshot(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate]);
+
   const plannedTasks = useMemo(() => {
     const tasks = planner?.tasks ?? [];
     const exact = tasks.filter((task) => task.date === selectedDate);
@@ -316,6 +376,63 @@ export default function TodayView() {
         priority: 92,
         projectId: 'health',
         detail: healthDay.plan,
+      });
+    }
+
+    for (const [index, activity] of (daySnapshot?.healthActivities ?? []).entries()) {
+      tasks.push({
+        id: `health-activity-${selectedDate}-${index}`,
+        title: `Health logged: ${activity.summary}`,
+        area: 'Health',
+        status: 'done',
+        source: activity.rawPath || 'structured/health/activity-log.jsonl',
+        date: selectedDate,
+        horizon: 'history',
+        priority: 94,
+        projectId: 'health',
+        detail: activity.calories
+          ? activity.caloriesQuality === 'unverified'
+            ? `Fitbit energy via Health Connect: ~${activity.calories} kcal (unverified; not used for calorie balance).`
+            : `Estimated activity energy: ~${activity.calories} kcal.`
+          : 'Logged activity.',
+      });
+    }
+
+    const healthActivityPaths = new Set((daySnapshot?.healthActivities ?? []).map((activity) => activity.rawPath).filter(Boolean));
+    const healthCaptures = (daySnapshot?.captures ?? []).filter(
+      (capture) => capture.projectId === 'health' && (!capture.path || !healthActivityPaths.has(capture.path))
+    );
+    if (healthCaptures.length > 0) {
+      const hasCompletedHealthEvent = healthCaptures.some((capture) =>
+        /workout|health_metric|exercise|nutrition/i.test(capture.intent)
+      );
+      tasks.push({
+        id: `health-captures-${selectedDate}`,
+        title: `Health captured ${healthCaptures.length} note${healthCaptures.length === 1 ? '' : 's'}`,
+        area: 'Health',
+        status: hasCompletedHealthEvent ? 'done' : 'suggested',
+        source: 'indexes/captures.jsonl',
+        date: selectedDate,
+        horizon: 'history',
+        priority: hasCompletedHealthEvent ? 88 : 64,
+        projectId: 'health',
+        detail: healthCaptures.slice(0, 3).map((capture) => capture.title).join('; '),
+      });
+    }
+
+    const nonHealthCaptures = (daySnapshot?.captures ?? []).filter((capture) => capture.projectId !== 'health');
+    if (nonHealthCaptures.length > 0) {
+      tasks.push({
+        id: `vault-captures-${selectedDate}`,
+        title: `Vault captured ${nonHealthCaptures.length} note${nonHealthCaptures.length === 1 ? '' : 's'}`,
+        area: 'Admin',
+        status: 'done',
+        source: 'indexes/captures.jsonl',
+        date: selectedDate,
+        horizon: 'history',
+        priority: 40,
+        projectId: undefined,
+        detail: nonHealthCaptures.slice(0, 3).map((capture) => capture.title).join('; '),
       });
     }
 
@@ -381,7 +498,7 @@ export default function TodayView() {
       if (order !== 0) return order;
       return b.priority - a.priority;
     });
-  }, [healthDay, healthLink, plannedTasks, publishingDay, selectedDate]);
+  }, [daySnapshot, healthDay, healthLink, plannedTasks, publishingDay, selectedDate]);
   const dashboardDate = useMemo(
     () => formatDashboardDate(selectedDate),
     [selectedDate]
@@ -476,6 +593,25 @@ export default function TodayView() {
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                 <h3 className="text-base font-semibold text-on-surface">{relativeDayLabel} agenda</h3>
               </div>
+              {(daySnapshot?.pendingQuestions?.length ?? 0) > 0 && (
+                <div className="mb-3 flex flex-col gap-2 rounded-lg border border-violet-200 bg-violet-50 p-3 text-violet-800 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 shrink-0" />
+                      <h4 className="text-sm font-semibold">{daySnapshot?.pendingQuestions.length} item(s) need decision</h4>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-violet-700">
+                      {daySnapshot?.pendingQuestions[0]?.question}
+                    </p>
+                  </div>
+                  <a
+                    href="/?view=planner"
+                    className="inline-flex h-8 shrink-0 items-center justify-center rounded border border-violet-200 bg-surface px-3 text-xs font-medium text-violet-700 hover:bg-violet-100"
+                  >
+                    Review
+                  </a>
+                </div>
+              )}
               <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
                 {agendaTasks.map((task) => {
                   return (
@@ -528,7 +664,7 @@ export default function TodayView() {
           <section className="rounded-lg border border-border bg-surface p-4 shadow-sm">
             <h3 className="text-base font-semibold text-on-surface">What changed</h3>
             <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-              {resume?.dailyBrief?.changedSinceYesterday ?? 'Recent vault changes will be summarized here.'}
+              {daySnapshot?.changedSummary ?? resume?.dailyBrief?.changedSinceYesterday ?? 'Recent vault changes will be summarized here.'}
             </p>
           </section>
         </div>

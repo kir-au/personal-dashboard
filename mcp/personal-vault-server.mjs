@@ -29,6 +29,7 @@ const GOOGLE_AUTHORIZATION_SERVER = 'https://accounts.google.com';
 const OAUTH_SCOPES = ['openid', 'email', 'profile'];
 const tokenCache = new Map();
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const MAX_CAPTURE_ATTACHMENT_BYTES = Number(process.env.MAX_CAPTURE_ATTACHMENT_BYTES || 8 * 1024 * 1024);
 
 const oauthSecuritySchemes = [
   {
@@ -50,6 +51,7 @@ const processorPrinciples = readOptionalRepoText('docs/personal-vault-fluid-capt
 const routingInstructions = [
   'Personal Vault is the user-owned memory store.',
   'capture_note is the main entrypoint: save raw Markdown first, then return proposed actions in the same tool result.',
+  'capture_note and capture_asset can store image bytes when the client provides dataBase64 or dataUrl attachments; ChatGPT internal file IDs alone are not enough to persist a physical image.',
   'Never assume a project hint alone means a structured dashboard update should be applied.',
   'Health dashboard proposals are only appropriate for factual health/activity records: completed exercises, sets, reps, weights, walking/cardio, symptoms, procedures, measurements, or medical decisions.',
   'Architecture discussions, MCP/OAuth/tool-discovery conversations, dashboard ideas, planning research, and memory-system decisions should normally stay as raw capture/inbox or be linked to a project as source evidence.',
@@ -185,6 +187,97 @@ function slugify(value) {
     .slice(0, 72) || 'capture';
 }
 
+function sanitizeAssetName(value, fallback = 'asset') {
+  return String(value || fallback)
+    .toLowerCase()
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/[^a-z0-9._ -]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 96) || fallback;
+}
+
+function extForMime(mimeType) {
+  const map = {
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/svg+xml': '.svg',
+    'application/pdf': '.pdf',
+    'text/plain': '.txt',
+    'text/csv': '.csv',
+    'application/json': '.json',
+  };
+  return map[String(mimeType || '').toLowerCase()] || '';
+}
+
+function decodeCaptureAttachment(attachment) {
+  const dataUrl = typeof attachment?.dataUrl === 'string' ? attachment.dataUrl.trim() : '';
+  let mimeType = typeof attachment?.mimeType === 'string' ? attachment.mimeType.trim().toLowerCase() : '';
+  let base64 = typeof attachment?.dataBase64 === 'string' ? attachment.dataBase64.trim() : '';
+
+  if (dataUrl) {
+    const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/s);
+    if (!match) throw new Error('Attachment dataUrl must be a base64 data URL.');
+    mimeType = match[1].trim().toLowerCase();
+    base64 = match[2].trim();
+  }
+
+  if (!base64) throw new Error('Attachment must include dataBase64 or dataUrl.');
+  if (!mimeType) mimeType = 'application/octet-stream';
+  if (!/^image\/(png|jpeg|gif|webp|svg\+xml)$/.test(mimeType)) {
+    throw new Error(`Unsupported capture attachment MIME type: ${mimeType}`);
+  }
+
+  const buffer = Buffer.from(base64.replace(/\s+/g, ''), 'base64');
+  if (!buffer.length) throw new Error('Attachment decoded to an empty file.');
+  if (buffer.byteLength > MAX_CAPTURE_ATTACHMENT_BYTES) {
+    throw new Error(`Attachment is ${buffer.byteLength} bytes; limit is ${MAX_CAPTURE_ATTACHMENT_BYTES} bytes.`);
+  }
+
+  return { buffer, mimeType };
+}
+
+async function saveCaptureAttachments({ attachments = [], rawDir, markdownBaseName, relativeMarkdownPath, title }) {
+  if (!attachments.length) return [];
+
+  const assetsDirName = `${markdownBaseName}.assets`;
+  const assetsDir = path.join(rawDir, assetsDirName);
+  await mkdir(assetsDir, { recursive: true });
+  await mkdir(path.join(VAULT_ROOT, 'indexes'), { recursive: true });
+
+  const saved = [];
+  for (const [index, attachment] of attachments.entries()) {
+    const { buffer, mimeType } = decodeCaptureAttachment(attachment);
+    const ext = extForMime(mimeType) || path.extname(attachment.name || '') || '.bin';
+    const baseName = sanitizeAssetName(path.basename(attachment.name || `image-${index + 1}`, path.extname(attachment.name || '')));
+    const filename = `${String(index + 1).padStart(2, '0')}-${baseName}${baseName.endsWith(ext) ? '' : ext}`;
+    const assetPath = path.join(assetsDir, filename);
+    await writeFile(assetPath, buffer);
+
+    const relativeAssetPath = path.relative(VAULT_ROOT, assetPath).split(path.sep).join('/');
+    const markdownRelativePath = `./${assetsDirName}/${filename}`;
+    const record = {
+      created: new Date().toISOString(),
+      source: 'mcp-capture',
+      title,
+      rawPath: relativeMarkdownPath,
+      vaultPath: relativeAssetPath,
+      originalName: attachment.name || filename,
+      mime: mimeType,
+      sizeBytes: buffer.byteLength,
+      alt: attachment.alt || attachment.caption || attachment.name || `capture image ${index + 1}`,
+      caption: attachment.caption || '',
+    };
+    saved.push({ ...record, markdownRelativePath });
+    await appendFile(path.join(VAULT_ROOT, 'indexes', 'capture-assets.jsonl'), JSON.stringify(record) + '\n', 'utf-8');
+  }
+
+  return saved;
+}
+
 function safeRelativePath(relativePath) {
   const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
   return normalized.startsWith('/') ? normalized.slice(1) : normalized;
@@ -302,7 +395,7 @@ async function walkMarkdown(dir, limit = 200, acc = []) {
   return acc;
 }
 
-async function createCapture({ input, source = 'chatgpt-mobile', projectId, intent = 'note', title }) {
+async function createCapture({ input, source = 'chatgpt-mobile', projectId, intent = 'note', title, attachments = [] }) {
   const now = new Date();
   const iso = now.toISOString();
   const date = getSydneyDate();
@@ -314,6 +407,20 @@ async function createCapture({ input, source = 'chatgpt-mobile', projectId, inte
   const filename = `${date}-capture-${slugify(title || input.split(/\s+/).slice(0, 9).join(' '))}.md`;
   const fullPath = path.join(rawDir, filename);
   const relativePath = path.relative(VAULT_ROOT, fullPath);
+  const markdownBaseName = path.basename(filename, '.md');
+  const savedAttachments = await saveCaptureAttachments({
+    attachments,
+    rawDir,
+    markdownBaseName,
+    relativeMarkdownPath: relativePath,
+    title: titleText,
+  });
+  const attachmentMarkdown = savedAttachments.flatMap((asset) => {
+    const alt = String(asset.alt || asset.originalName || 'capture image').replace(/[\[\]\n\r]/g, ' ').trim();
+    const lines = [`![${alt}](${asset.markdownRelativePath})`];
+    if (asset.caption) lines.push(`_${asset.caption}_`);
+    return ['', ...lines];
+  });
   const content = [
     '---',
     `title: ${JSON.stringify(titleText)}`,
@@ -321,12 +428,14 @@ async function createCapture({ input, source = 'chatgpt-mobile', projectId, inte
     `source: ${JSON.stringify(source)}`,
     `capture_intent: ${JSON.stringify(intent)}`,
     projectId ? `project: ${JSON.stringify(projectId)}` : '',
+    savedAttachments.length ? `asset_count: ${savedAttachments.length}` : '',
     'privacy: private',
     '---',
     '',
     `# ${titleText}`,
     '',
     input,
+    ...attachmentMarkdown,
     '',
   ].filter(Boolean).join('\n');
 
@@ -334,11 +443,31 @@ async function createCapture({ input, source = 'chatgpt-mobile', projectId, inte
   await mkdir(path.join(VAULT_ROOT, 'indexes'), { recursive: true });
   await appendFile(
     path.join(VAULT_ROOT, 'indexes', 'captures.jsonl'),
-    JSON.stringify({ created: iso, source, intent, projectId: projectId || null, path: relativePath, title: titleText }) + '\n',
+    JSON.stringify({
+      created: iso,
+      source,
+      intent,
+      projectId: projectId || null,
+      path: relativePath,
+      title: titleText,
+      assetCount: savedAttachments.length,
+      assets: savedAttachments.map((asset) => ({
+        vaultPath: asset.vaultPath,
+        mime: asset.mime,
+        sizeBytes: asset.sizeBytes,
+        originalName: asset.originalName,
+      })),
+    }) + '\n',
     'utf-8'
   );
 
-  return { path: relativePath, title: titleText, created: iso };
+  return {
+    path: relativePath,
+    title: titleText,
+    created: iso,
+    assetCount: savedAttachments.length,
+    assets: savedAttachments.map(({ markdownRelativePath, ...asset }) => asset),
+  };
 }
 
 async function applyDashboardCaptureAction(capturePath, proposal) {
@@ -707,7 +836,7 @@ async function loadCaptureReview(capturePath) {
 
 function createPersonalVaultServer() {
   const server = new McpServer(
-    { name: 'personal-vault', version: '0.1.0' },
+    { name: 'personal-vault', version: '0.1.1' },
     {
       instructions: routingInstructions,
     }
@@ -723,13 +852,21 @@ function createPersonalVaultServer() {
         title: z.string().optional().describe('Short human-readable title.'),
         projectId: z.string().optional().describe('Optional project id such as health, ai, business, family, wealth, travel.'),
         intent: z.enum(['note', 'achievement', 'workout', 'task', 'decision', 'question', 'replan']).optional(),
+        attachments: z.array(z.object({
+          name: z.string().optional().describe('Original file name, for example breakfast.jpg.'),
+          mimeType: z.string().optional().describe('Image MIME type such as image/jpeg, image/png, image/webp, or image/gif.'),
+          dataBase64: z.string().optional().describe('Raw base64 file bytes. Use dataUrl instead if easier.'),
+          dataUrl: z.string().optional().describe('A data URL such as data:image/jpeg;base64,...'),
+          alt: z.string().optional().describe('Short alt text for the Markdown image.'),
+          caption: z.string().optional().describe('Optional human-readable caption saved below the image.'),
+        })).optional().describe('Optional image files to store beside the raw Markdown capture in a sibling .assets directory.'),
       },
       _meta: { securitySchemes: oauthSecuritySchemes },
     },
-    async ({ input, title, projectId, intent }, extra) => {
+    async ({ input, title, projectId, intent, attachments }, extra) => {
       const auth = await requireGoogleAuth(extra);
       if (!auth.ok) return authError(extra);
-      const capture = await createCapture({ input, title, projectId, intent });
+      const capture = await createCapture({ input, title, projectId, intent, attachments });
       const proposalSet = await createCaptureProposals(capture.path);
       const proposalText = proposalSet.proposals
         .map((proposal, index) => `${index + 1}. ${proposal.id}: ${proposal.label} - ${proposal.preview}`)
@@ -737,12 +874,18 @@ function createPersonalVaultServer() {
       const questionText = proposalSet.questions.length
         ? proposalSet.questions.map((question, index) => `${index + 1}. ${question.question}`).join('\n')
         : 'None.';
+      const attachmentText = capture.assets.length
+        ? capture.assets.map((asset, index) => `${index + 1}. ${asset.vaultPath} (${asset.mime}, ${asset.sizeBytes} bytes)`).join('\n')
+        : 'None.';
       return {
         content: [
           {
             type: 'text',
             text: [
               `Saved raw capture to Personal Vault: ${capture.path}.`,
+              '',
+              'Saved attachments:',
+              attachmentText,
               '',
               `Proposed next actions:`,
               proposalText,
@@ -755,6 +898,102 @@ function createPersonalVaultServer() {
           },
         ],
         structuredContent: { ...capture, proposalSet },
+      };
+    }
+  );
+
+  server.registerTool(
+    'capture_asset',
+    {
+      title: 'capture_asset',
+      description: 'Attach image bytes to an existing raw Personal Vault capture. Requires dataBase64 or dataUrl; a ChatGPT file_id alone is not enough to save the original image.',
+      inputSchema: {
+        capturePath: z.string().min(1).describe('Vault-relative raw Markdown path returned by capture_note.'),
+        attachments: z.array(z.object({
+          name: z.string().optional().describe('Original file name, for example breakfast.jpg.'),
+          mimeType: z.string().optional().describe('Image MIME type such as image/jpeg, image/png, image/webp, or image/gif.'),
+          dataBase64: z.string().optional().describe('Raw base64 file bytes. Use dataUrl instead if easier.'),
+          dataUrl: z.string().optional().describe('A data URL such as data:image/jpeg;base64,...'),
+          alt: z.string().optional().describe('Short alt text for the Markdown image.'),
+          caption: z.string().optional().describe('Optional human-readable caption saved below the image.'),
+        })).min(1).describe('Image files to store beside the raw Markdown capture in a sibling .assets directory.'),
+      },
+      _meta: { securitySchemes: oauthSecuritySchemes },
+    },
+    async ({ capturePath, attachments }, extra) => {
+      const auth = await requireGoogleAuth(extra);
+      if (!auth.ok) return authError(extra);
+
+      const relativePath = safeRelativePath(capturePath);
+      if (!relativePath.endsWith('.md')) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: 'capturePath must point to a raw Markdown .md file.' }],
+        };
+      }
+
+      const fullPath = path.join(VAULT_ROOT, relativePath);
+      const existing = await readFile(fullPath, 'utf-8').catch(() => null);
+      if (existing == null) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Capture not found: ${relativePath}` }],
+        };
+      }
+
+      const rawDir = path.dirname(fullPath);
+      const markdownBaseName = path.basename(fullPath, '.md');
+      const savedAttachments = await saveCaptureAttachments({
+        attachments,
+        rawDir,
+        markdownBaseName,
+        relativeMarkdownPath: relativePath,
+        title: path.basename(markdownBaseName),
+      });
+
+      const attachmentMarkdown = savedAttachments.flatMap((asset) => {
+        const alt = String(asset.alt || asset.originalName || 'capture image').replace(/[\[\]\n\r]/g, ' ').trim();
+        const lines = [`![${alt}](${asset.markdownRelativePath})`];
+        if (asset.caption) lines.push(`_${asset.caption}_`);
+        return ['', ...lines];
+      }).join('\n');
+
+      await appendFile(fullPath, `\n${attachmentMarkdown}\n`, 'utf-8');
+      await appendFile(
+        path.join(VAULT_ROOT, 'indexes', 'captures.jsonl'),
+        JSON.stringify({
+          created: new Date().toISOString(),
+          source: 'mcp-capture-asset',
+          intent: 'asset',
+          projectId: null,
+          path: relativePath,
+          title: `Assets for ${path.basename(relativePath)}`,
+          assetCount: savedAttachments.length,
+          assets: savedAttachments.map((asset) => ({
+            vaultPath: asset.vaultPath,
+            mime: asset.mime,
+            sizeBytes: asset.sizeBytes,
+            originalName: asset.originalName,
+          })),
+        }) + '\n',
+        'utf-8'
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: [
+              `Attached ${savedAttachments.length} asset(s) to ${relativePath}.`,
+              ...savedAttachments.map((asset, index) => `${index + 1}. ${asset.vaultPath} (${asset.mime}, ${asset.sizeBytes} bytes)`),
+            ].join('\n'),
+          },
+        ],
+        structuredContent: {
+          capturePath: relativePath,
+          assetCount: savedAttachments.length,
+          assets: savedAttachments.map(({ markdownRelativePath, ...asset }) => asset),
+        },
       };
     }
   );

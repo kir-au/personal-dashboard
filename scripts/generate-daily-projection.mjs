@@ -61,6 +61,57 @@ function task({ id, title, area, status = 'suggested', source, date, horizon, pr
   return { id, title, area, status, source, date, horizon, priority, projectId, detail };
 }
 
+function dateMs(date) {
+  return new Date(`${date}T00:00:00Z`).getTime();
+}
+
+function addDays(date, amount) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + amount);
+  return value.toISOString().slice(0, 10);
+}
+
+function runningBlockForDate(healthPlan, date) {
+  if (!healthPlan || ['paused', 'cancelled', 'archived', 'inactive'].includes(String(healthPlan.status || '').toLowerCase())) return null;
+  const directDay = healthPlan?.days?.find?.((day) => day.date === date);
+  if (directDay) {
+    return {
+      title: directDay.title || `Day ${directDay.day}`,
+      plan: directDay.plan,
+      detail: directDay.notes || healthPlan?.rules?.[0],
+    };
+  }
+
+  const weeks = healthPlan?.weeks || [];
+  const currentWeek = weeks
+    .filter((week) => week.starts && dateMs(week.starts) <= dateMs(date))
+    .sort((a, b) => dateMs(b.starts) - dateMs(a.starts))[0];
+  if (!currentWeek) return null;
+
+  if (date === currentWeek.starts) {
+    return {
+      title: `Week ${currentWeek.week}: Quality run`,
+      plan: currentWeek.qualitySession,
+      detail: currentWeek.notes || healthPlan?.rules?.[0],
+    };
+  }
+
+  const longRunDate = addDays(currentWeek.starts, 4);
+  if (date === longRunDate) {
+    return {
+      title: `Week ${currentWeek.week}: Long run`,
+      plan: currentWeek.sundayLongRun,
+      detail: currentWeek.notes || healthPlan?.rules?.[0],
+    };
+  }
+
+  return {
+    title: `Week ${currentWeek.week}: recovery-aware movement`,
+    plan: 'Walk, sunlight, mobility, or easy conversational movement if recovery is green.',
+    detail: currentWeek.notes || healthPlan?.rules?.[0],
+  };
+}
+
 async function main() {
   const today = getSydneyDate(0);
   const tomorrow = getSydneyDate(1);
@@ -73,54 +124,53 @@ async function main() {
 
   const capturesByProject = byProject(captures);
   const sourcesByProject = byProject(projectSources);
-  const latestActivity = activityLog.slice().reverse().find((entry) => entry.date <= today);
-  const tomorrowRun =
-    healthPlan?.days?.find?.((day) => day.date === tomorrow) ||
-    healthPlan?.weeks?.find?.((week) => week.starts === tomorrow);
-  const tomorrowRunTitle = tomorrowRun?.title || (tomorrowRun ? `Week ${tomorrowRun.week}: Quality run` : null);
-  const tomorrowRunPlan = tomorrowRun?.plan || tomorrowRun?.qualitySession || null;
-  const healthRule = healthPlan?.rule || healthPlan?.rules?.[0] || 'Only progress if recovery is green.';
+  const todayActivity = activityLog.slice().reverse().find((entry) => entry.date === today);
+  const todayRun = runningBlockForDate(healthPlan, today);
+  const tomorrowRun = runningBlockForDate(healthPlan, tomorrow);
+  const healthRule = runningBlockForDate(healthPlan, tomorrow)
+    ? (healthPlan?.rule || healthPlan?.rules?.[0] || 'Only progress if recovery is green.')
+    : 'Record whatever movement you actually complete; no fixed running session is scheduled.';
 
   const todayTasks = [
     task({
+      id: 'today-routine-check-in',
+      title: 'Daily routine anchors: wake, walk, 4PM reset.',
+      area: 'Routine',
+      status: 'planned',
+      source: 'structured/routine/2026-07-11-daily-wake-walk-4pm-alcohol-routine.md',
+      date: today,
+      horizon: 'today',
+      priority: 120,
+      projectId: 'routine',
+      detail: 'Morning: wake time, sleep/energy, walk/sun plan, health readiness, main constraint. Day: walk outside. 4PM: protein, water, leave room, move 10 minutes, delay 20 minutes.',
+    }),
+    task({
+      id: 'today-health-plan',
+      title: todayActivity
+        ? `Health logged: ${todayActivity.summary}`
+        : todayRun?.title || 'Health movement baseline.',
+      area: 'Health',
+      status: todayActivity ? 'done' : 'planned',
+      source: todayActivity?.rawPath || 'structured/health/health-state.json',
+      date: today,
+      horizon: 'today',
+      priority: 100,
+      projectId: 'health',
+      detail: todayActivity?.calories?.totalEstimatedCalories
+        ? `Estimated burn: ~${todayActivity.calories.totalEstimatedCalories} kcal.`
+        : todayRun?.plan || 'Log exercise, food, weight, pain, symptoms, or recovery if anything changes.',
+    }),
+    task({
       id: 'today-ai-projection',
-      title: 'Turn recent vault records into a visible Today/Tomorrow projection.',
+      title: 'Make Today projection regenerate from the vault instead of going stale.',
       area: 'AI',
       status: 'planned',
       source: 'captures.jsonl + structured/projects + current Codex discussion',
       date: today,
       horizon: 'today',
-      priority: 100,
-      projectId: 'ai',
-      detail: 'Generate assistant review cards and dated tasks from the last 30 days instead of static planner text.',
-    }),
-    task({
-      id: 'today-health-logged',
-      title: latestActivity
-        ? `Health logged: ${latestActivity.summary}`
-        : 'Log today’s health baseline if anything changed.',
-      area: 'Health',
-      status: latestActivity?.date === today ? 'done' : 'suggested',
-      source: latestActivity?.rawPath || 'structured/health/activity-log.jsonl',
-      date: today,
-      horizon: 'today',
       priority: 90,
-      projectId: 'health',
-      detail: latestActivity?.calories?.totalEstimatedCalories
-        ? `Estimated burn: ~${latestActivity.calories.totalEstimatedCalories} kcal.`
-        : 'Keep health state current before adding more plans.',
-    }),
-    task({
-      id: 'today-ai-capture-loop',
-      title: 'Use the header capture/voice box as the control input when plans change.',
-      area: 'AI',
-      status: 'planned',
-      source: 'Personal Assistant Rolling Strategy + recent voice capture tests',
-      date: today,
-      horizon: 'today',
-      priority: 80,
       projectId: 'ai',
-      detail: 'Capture raw first; processor decides whether it becomes task, health log, review item, or nothing.',
+      detail: 'Generate dated routine, health, and project items for the current day before rendering Today.',
     }),
     task({
       id: 'today-wealth-review',
@@ -138,18 +188,30 @@ async function main() {
 
   const tomorrowTasks = [
     task({
-      id: 'tomorrow-health-5k-week-1',
+      id: 'tomorrow-routine-check-in',
+      title: 'Morning check-in and outside walk.',
+      area: 'Routine',
+      status: 'planned',
+      source: 'structured/routine/2026-07-11-daily-wake-walk-4pm-alcohol-routine.md',
+      date: tomorrow,
+      horizon: 'tomorrow',
+      priority: 110,
+      projectId: 'routine',
+      detail: 'Keep the same baseline even if no new captures arrive: wake target, walk/sun, movement, 4PM plan.',
+    }),
+    task({
+      id: 'tomorrow-health-movement',
       title: tomorrowRun
-        ? `${tomorrowRunTitle}: ${tomorrowRunPlan}`
-        : 'Check the next running/health block.',
+        ? `${tomorrowRun.title}: ${tomorrowRun.plan}`
+        : 'Health movement baseline.',
       area: 'Health',
       status: 'planned',
-      source: 'structured/health/5k-running-plan.json',
+      source: tomorrowRun?.source || 'structured/health/health-state.json',
       date: tomorrow,
       horizon: 'tomorrow',
       priority: 95,
       projectId: 'health',
-      detail: healthRule,
+      detail: tomorrowRun?.detail || healthRule,
     }),
     task({
       id: 'tomorrow-ai-processor',
@@ -199,17 +261,6 @@ async function main() {
       priority: 85,
       projectId: 'ai',
       detail: aiInsights?.suggestedActions?.[0]?.description || '',
-    }),
-    task({
-      id: 'review-health-running-reference',
-      title: 'Add a clear reference for the 5K quality run if the session is still unclear.',
-      area: 'Health',
-      status: 'review',
-      source: 'structured/health/5k-running-plan.json',
-      horizon: 'this-week',
-      priority: 75,
-      projectId: 'health',
-      detail: 'The Health timeline has a quality-run item but no visual/media reference. Either keep the text explanation, add a reference, or ask for a better example.',
     }),
     task({
       id: 'review-family-context',

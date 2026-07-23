@@ -37,6 +37,7 @@ export interface AssistantReviewCard {
   suggestedAction: string;
   evidencePath?: string;
   evidenceLabel?: string;
+  questions?: string[];
   recentCaptures: number;
   linkedSources: number;
 }
@@ -121,6 +122,58 @@ export default function AssistantActionsPanel({ assistantReview, reviewTasks, co
       </div>
 
       <div className="flex flex-col gap-3">
+        {(assistantReview?.cards ?? []).map((card) => (
+          <article key={`${card.projectId}-${card.title}`} className="rounded-lg border border-border bg-surface-variant p-3">
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-primary">{iconForProject(card.projectId)}</span>
+                <div className="min-w-0">
+                  <h4 className="truncate text-sm font-semibold text-on-surface">{card.projectTitle}</h4>
+                  <p className="text-xs text-on-surface-variant">
+                    {card.recentCaptures} capture(s) / {card.linkedSources} source(s)
+                  </p>
+                </div>
+              </div>
+              <span className="shrink-0 rounded border border-border bg-surface px-2 py-0.5 text-xs text-on-surface-variant">
+                {reviewStatusLabel[card.status]}
+              </span>
+            </div>
+            <p className="text-sm font-semibold leading-snug text-on-surface">{card.title}</p>
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">{card.reason}</p>
+            {card.questions?.length ? (
+              <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-2.5">
+                <p className="text-xs font-semibold text-amber-900">Need from you</p>
+                <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-amber-900">
+                  {card.questions.map((question) => (
+                    <li key={question}>- {question}</li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-amber-800">Answer through the capture box; the source record stays unchanged.</p>
+              </div>
+            ) : null}
+            <p className="mt-3 text-xs leading-relaxed text-on-surface-variant">
+              <span className="font-semibold text-on-surface">Proposed next step:</span> {card.suggestedAction}
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <a
+                href={projectHref(card.projectId) ?? '/?view=today'}
+                className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
+              >
+                Open project
+                <ArrowRight className="h-3 w-3" />
+              </a>
+              {card.evidencePath ? (
+                <a
+                  href={`/?view=vault&path=${encodeURIComponent(card.evidencePath)}`}
+                  className="inline-flex max-w-full items-center gap-1 text-xs font-medium text-on-surface-variant hover:text-primary hover:underline"
+                >
+                  <span className="truncate">{card.evidenceLabel || 'Evidence'}</span>
+                </a>
+              ) : null}
+            </div>
+          </article>
+        ))}
+
         {reviewTasks.map((task) => {
           const href = projectHref(task.projectId);
           return (
@@ -145,44 +198,6 @@ export default function AssistantActionsPanel({ assistantReview, reviewTasks, co
             </article>
           );
         })}
-
-        {(assistantReview?.cards ?? []).map((card) => (
-          <article key={card.projectId} className="rounded-lg border border-border bg-surface-variant p-3">
-            <div className="mb-2 flex items-start justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="text-primary">{iconForProject(card.projectId)}</span>
-                <div className="min-w-0">
-                  <h4 className="truncate text-sm font-semibold text-on-surface">{card.projectTitle}</h4>
-                  <p className="text-xs text-on-surface-variant">
-                    {card.recentCaptures} capture(s) / {card.linkedSources} source(s)
-                  </p>
-                </div>
-              </div>
-              <span className="shrink-0 rounded border border-border bg-surface px-2 py-0.5 text-xs text-on-surface-variant">
-                {reviewStatusLabel[card.status]}
-              </span>
-            </div>
-            <p className="text-sm font-medium leading-snug text-on-surface">{card.suggestedAction}</p>
-            <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-on-surface-variant">{card.reason}</p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <a
-                href={projectHref(card.projectId) ?? '/?view=today'}
-                className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-primary hover:bg-active"
-              >
-                Open project
-                <ArrowRight className="h-3 w-3" />
-              </a>
-              {card.evidencePath ? (
-                <a
-                  href={`/?view=vault&path=${encodeURIComponent(card.evidencePath)}`}
-                  className="inline-flex max-w-full items-center gap-1 text-xs font-medium text-on-surface-variant hover:text-primary hover:underline"
-                >
-                  <span className="truncate">{card.evidenceLabel || 'Evidence'}</span>
-                </a>
-              ) : null}
-            </div>
-          </article>
-        ))}
 
         {reviewTasks.length === 0 && (assistantReview?.cards ?? []).length === 0 ? (
           <p className="rounded-lg border border-border bg-surface-variant p-3 text-sm text-on-surface-variant">

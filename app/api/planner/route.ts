@@ -1,9 +1,23 @@
 import { NextResponse } from 'next/server';
+import { execFile } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
+import { promisify } from 'util';
 
 const VAULT_ROOT = path.join(process.env.HOME || '', 'personal-vault');
 const DAILY_PROJECTION_PATH = path.join(VAULT_ROOT, 'structured', 'plans', 'daily-projection.json');
+const execFileAsync = promisify(execFile);
+
+export const runtime = 'nodejs';
+
+function getSydneyDate() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Sydney',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
 
 async function readDailyProjection() {
   try {
@@ -64,8 +78,30 @@ function fallbackProjection() {
   });
 }
 
+function isProjectionStale(projection: any) {
+  return projection?.dates?.today !== getSydneyDate();
+}
+
+async function regenerateDailyProjection() {
+  const scriptPath = path.join(process.cwd(), 'scripts', 'generate-daily-projection.mjs');
+  await execFileAsync(process.execPath, [scriptPath], {
+    cwd: process.cwd(),
+    timeout: 20_000,
+    maxBuffer: 1024 * 1024,
+  });
+}
+
 export async function GET() {
-  const projection = await readDailyProjection();
+  let projection = await readDailyProjection();
+  if (!projection || isProjectionStale(projection)) {
+    try {
+      await regenerateDailyProjection();
+      projection = await readDailyProjection();
+    } catch (error) {
+      console.error('Failed to refresh daily projection', error);
+    }
+  }
+
   if (projection) {
     return NextResponse.json({
       ...projection,

@@ -44,8 +44,23 @@ type ReviewCard = {
   suggestedAction: string;
   evidencePath?: string;
   evidenceLabel?: string;
+  questions?: string[];
   recentCaptures: number;
   linkedSources: number;
+};
+
+type DataQualityReview = {
+  id?: string;
+  updatedAt?: string;
+  projectId?: string;
+  projectTitle?: string;
+  status?: 'open' | 'needs-input' | 'resolved' | 'dismissed';
+  priority?: number;
+  title?: string;
+  interpretation?: string;
+  questions?: string[];
+  suggestedAction?: string;
+  evidencePath?: string;
 };
 
 function parseJsonLine<T>(line: string): T | null {
@@ -185,10 +200,11 @@ function sourceReason(source?: ProjectConversation) {
 }
 
 export async function GET() {
-  const [projects, captures, projectConversations] = await Promise.all([
+  const [projects, captures, projectConversations, dataQualityReviews] = await Promise.all([
     readRegistry(),
     readJsonl<CaptureEntry>('indexes/captures.jsonl'),
     readJsonl<ProjectConversation>('indexes/project-conversations.jsonl'),
+    readJsonl<DataQualityReview>('indexes/data-quality-reviews.jsonl'),
   ]);
 
   const recentCaptures = captures.filter((capture) => daysAgo(capture.created) <= 30);
@@ -262,7 +278,33 @@ export async function GET() {
     });
   }
 
-  const sortedCards = cards
+  const latestQualityReviews = new Map<string, DataQualityReview>();
+  for (const review of dataQualityReviews) {
+    if (!review.id) continue;
+    const current = latestQualityReviews.get(review.id);
+    if (!current || String(review.updatedAt || '') >= String(current.updatedAt || '')) {
+      latestQualityReviews.set(review.id, review);
+    }
+  }
+
+  const qualityCards: ReviewCard[] = [...latestQualityReviews.values()]
+    .filter((review) => !['resolved', 'dismissed'].includes(String(review.status || 'open')))
+    .map((review) => ({
+      projectId: review.projectId || 'inbox',
+      projectTitle: review.projectTitle || 'Data quality',
+      status: 'needs-review',
+      priority: review.priority ?? 100,
+      title: review.title || 'Review a questionable source claim',
+      reason: review.interpretation || 'The assistant found a claim that should not be accepted without review.',
+      suggestedAction: review.suggestedAction || 'Review the evidence and provide the missing context.',
+      evidencePath: review.evidencePath,
+      evidenceLabel: 'Evidence',
+      questions: review.questions,
+      recentCaptures: 0,
+      linkedSources: 1,
+    }));
+
+  const sortedCards = [...qualityCards, ...cards]
     .filter((card) => card.priority > 0 || ['health', 'ai', 'business', 'wealth', 'routine'].includes(card.projectId))
     .sort((a, b) => b.priority - a.priority)
     .slice(0, 8);
